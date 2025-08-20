@@ -17,7 +17,7 @@ warnings.filterwarnings(
     category=asdf.exceptions.AsdfPackageVersionWarning
 )
 from star_sharp import StarSharp
-from figure import layout_figure
+from figure import layout_singlet_figure, layout_triplet_figure
 import astropy.units as u
 
 SIGMA_TO_FWHM = np.sqrt(np.log(256))
@@ -252,7 +252,13 @@ def main(args):
         u = gridded["u"]
         v = gridded["v"]
 
-        layout = layout_figure()
+        do_triplet_layout = args.plot_triplet or (aos_fam_avg is not None and not args.plot_singlet)
+        if do_triplet_layout:
+            layout = layout_triplet_figure()
+            zk_axs = layout["zk_axs"]
+        else:
+            layout = layout_singlet_figure()
+
         # Unpack
         fig = layout["fig"]
 
@@ -261,7 +267,6 @@ def main(args):
         dz_ax=layout["dz_ax"]
         text_ax=layout["text_ax"]
 
-        zk_axs = layout["zk_axs"]
         shape_axs = layout["shape_axs"]
         fwhm_cax=layout["fwhm_cax"]
         ellip_cax=layout["ellip_cax"]
@@ -271,8 +276,9 @@ def main(args):
         w_cax = layout["w_cax"]
 
         # Moments panels
-        T_kwargs = dict(s=10, vmin=0.0, vmax=2.0, cmap="turbo")
-        w_kwargs = dict(s=10, vmin=-0.5, vmax=0.5, cmap="bwr")
+        s = 30 if not do_triplet_layout else 10
+        T_kwargs = dict(s=s, vmin=0.0, vmax=2.0, cmap="turbo")
+        w_kwargs = dict(s=s, vmin=-0.5, vmax=0.5, cmap="bwr")
         T_scatter = moments_axs[0, 0].scatter(
             u,
             v,
@@ -332,8 +338,8 @@ def main(args):
         )
 
         # Shape panels
-        FWHM_kwargs = dict(s=10, vmin=0.5, vmax=2.0, cmap="turbo")
-        e_kwargs = dict(s=10, vmin=-0.3, vmax=0.3, cmap="bwr")
+        FWHM_kwargs = dict(s=s, vmin=0.5, vmax=2.0, cmap="turbo")
+        e_kwargs = dict(s=s, vmin=-0.3, vmax=0.3, cmap="bwr")
 
         shape_axs[0, 0].quiver(
             u,
@@ -413,7 +419,7 @@ def main(args):
             **e_kwargs
         )
 
-        for ax in chain(moments_axs.flat, zk_axs.flat, shape_axs.flat):
+        for ax in chain(moments_axs.flat, shape_axs.flat, zk_axs.flat if "zk_axs" in layout else []):
             th = np.linspace(0, 2 * np.pi, 100)
             x = 1.75 * np.cos(th)
             y = 1.75 * np.sin(th)
@@ -425,7 +431,7 @@ def main(args):
         fig.colorbar(e_scatter, cax=ellip_cax)
 
         # FAM Zernikes panels
-        if aos_fam_avg is not None:
+        if do_triplet_layout and aos_fam_avg is not None:
             model_fam_zks = dfit.wf_model(
                 np.rad2deg(aos_fam_avg["thx_OCS"]),
                 np.rad2deg(aos_fam_avg["thy_OCS"]),
@@ -522,5 +528,8 @@ if __name__ == "__main__":
     parser.add_argument("--transverse_field_radii", type=int, default=14, help="Number of transverse field radii")
     parser.add_argument("--wf_kmax", type=int, default=15, help="Maximum wavefront field Noll index")
     parser.add_argument("--wf_jmax", type=int, default=28, help="Maximum wavefront pupil Noll index")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--plot_triplet", action="store_true", help="Plot as triplet figure layout")
+    group.add_argument("--plot_singlet", action="store_true", help="Plot as singlet figure layout")
     args = parser.parse_args()
     main(args)
