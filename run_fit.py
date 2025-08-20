@@ -247,7 +247,7 @@ def main(args):
         model_moments["ey"] = model_moments["e"] * np.sin(model_moments["beta"])
         model_moments["FWHM"] = np.sqrt(model_moments["T"]/2) * SIGMA_TO_FWHM
 
-    if args.plot:
+    if args.plot is not None:
         # We'll use these a lot, so unpack here
         u = gridded["u"]
         v = gridded["v"]
@@ -511,14 +511,14 @@ def main(args):
         # vmode dz panel
         dfit.plot_sens_dz(dz_ax, cmap="bwr")
 
-        fig.savefig("test.png")
+        fig.savefig(args.plot)
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("filename", type=str, help="Input ASDF file")
-    parser.add_argument("--plot", action="store_true", help="Plot the results")
+    parser.add_argument("--plot", type=str, default=None, help="Filename for plot output")
     parser.add_argument("--fit_moments", action="store_true", help="Fit moments")
     parser.add_argument("--fit_fam", action="store_true", help="Fit full array mode wavefront")
     parser.add_argument("--fit_corners", action="store_true", help="Fit corner wavefront")
