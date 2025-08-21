@@ -307,6 +307,45 @@ def get_dzs(
     return dzs
 
 
+def grid_measurements(
+    u: FloatArray, # [n,]
+    v: FloatArray, # [n,]
+    vals: dict[str, FloatArray],  # process each key...
+    ugrid: FloatArray, # [k,]
+    vgrid: FloatArray, # [k,]
+) -> dict[str, NDArray[np.float64]]:
+    if isinstance(vals, Table):
+        vals = {k:vals[k] for k in vals.colnames}
+    ref = np.array(list(zip(ugrid, vgrid)))
+    test = np.array(list(zip(u, v)))
+    tree = KDTree(ref)
+    distances, dest_indices = tree.query(test)
+
+    val_sums = {}
+    for k in vals.keys():
+        val_sums[k] = {i:0 for i in range(len(ugrid))}
+    counts = {i:0 for i in range(len(ugrid))}
+
+    for src_idx, dest_idx in enumerate(dest_indices):
+        for k in vals.keys():
+            val_sums[k][dest_idx] += vals[k][src_idx]
+        counts[dest_idx] += 1
+
+    out = {
+        k: np.array(
+            [
+                float(val_sums[k][i] / counts[i])
+                if counts[i] != 0
+                else float("nan")
+                for i in range(len(ugrid))
+            ]
+        )
+        for k in vals
+    }
+
+    return out
+
+
 class StarSharp:
     """ Fit optical state either from wavefront measurements
     (Zernikes) or 2nd moment measurements.
@@ -852,83 +891,6 @@ class StarSharp:
             wf += zk0
 
         return wf
-
-    def grid_moment_measurements(
-        self,
-        u: FloatArray,
-        v: FloatArray,
-        Ixx: FloatArray,
-        Ixy: FloatArray,
-        Iyy: FloatArray,
-    ) -> dict[str, NDArray[np.float64]]:
-        ref = np.array(list(zip(self.field_u, self.field_v)))
-        test = np.array(list(zip(u, v)))
-        tree = KDTree(ref)
-        distances, indices = tree.query(test)
-
-        rfield = range(self.n_field)
-        Ixx_sums = {i: 0 for i in rfield}
-        Ixy_sums = {i: 0 for i in rfield}
-        Iyy_sums = {i: 0 for i in rfield}
-        counts = {i: 0 for i in rfield}
-
-        for idx, Ixx_, Ixy_, Iyy_ in zip(indices, Ixx, Ixy, Iyy):
-            Ixx_sums[idx] += Ixx_
-            Ixy_sums[idx] += Ixy_
-            Iyy_sums[idx] += Iyy_
-            counts[idx] += 1
-
-        Ixx_avg = np.array(
-            [
-                float(Ixx_sums[i] / counts[i]) if counts[i] != 0 else float("nan")
-                for i in rfield
-            ]
-        )
-        Ixy_avg = np.array(
-            [
-                float(Ixy_sums[i] / counts[i]) if counts[i] != 0 else float("nan")
-                for i in rfield
-            ]
-        )
-        Iyy_avg = np.array(
-            [
-                float(Iyy_sums[i] / counts[i]) if counts[i] != 0 else float("nan")
-                for i in rfield
-            ]
-        )
-        T_avg = Ixx_avg + Iyy_avg
-        w1_avg = Ixx_avg - Iyy_avg
-        w2_avg = 2 * Ixy_avg
-        w_avg = np.hypot(w1_avg, w2_avg)
-        e1_avg = w1_avg / T_avg
-        e2_avg = w2_avg / T_avg
-        e_avg = np.hypot(e1_avg, e2_avg)
-        beta_avg = 0.5 * np.arctan2(e2_avg, e1_avg)
-        wx_avg = w_avg * np.cos(beta_avg)
-        wy_avg = w_avg * np.sin(beta_avg)
-        ex_avg = e_avg * np.cos(beta_avg)
-        ey_avg = e_avg * np.sin(beta_avg)
-        FWHM_avg = np.sqrt(T_avg / 2 * np.log(256))
-        return dict(
-            u=self.field_u,
-            v=self.field_v,
-            Ixx=Ixx_avg,
-            Ixy=Ixy_avg,
-            Iyy=Iyy_avg,
-            T=T_avg,
-            w1=w1_avg,
-            w2=w2_avg,
-            w=w_avg,
-            e1=e1_avg,
-            e2=e2_avg,
-            e=e_avg,
-            beta=beta_avg,
-            wx=wx_avg,
-            wy=wy_avg,
-            ex=ex_avg,
-            ey=ey_avg,
-            FWHM=FWHM_avg,
-        )
 
     def _moments_residual(
         self,

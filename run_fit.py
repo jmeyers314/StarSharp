@@ -16,7 +16,7 @@ warnings.filterwarnings(
     "ignore",
     category=asdf.exceptions.AsdfPackageVersionWarning
 )
-from star_sharp import StarSharp
+from star_sharp import StarSharp, grid_measurements
 from figure import layout_singlet_figure, layout_triplet_figure, AxisText
 from scipy.optimize import least_squares
 import astropy.units as u
@@ -140,13 +140,19 @@ def main(args):
         tqdm = tqdm,
     )
 
-    gridded = ssh.grid_moment_measurements(
+    gridded = grid_measurements(
         src["aa_x"] * MM_TO_DEGREE,
-        -src["aa_y"] * MM_TO_DEGREE,  # +alt is -ve y_OCS
-        src["aa_Ixx"],
-        -src["aa_Ixy"],
-        src["aa_Iyy"],
+        -src["aa_y"] * MM_TO_DEGREE,  # +ve alt is -ve y_OCS
+        {
+            "Ixx":src["aa_Ixx"],
+            "Ixy":-src["aa_Ixy"], #+ve alt is -ve y_OCS
+            "Iyy":src["aa_Iyy"]
+        },
+        ssh.field_u, ssh.field_v,
     )
+    gridded = augment_moments(gridded, "")
+    gridded["u"] = ssh.field_u
+    gridded["v"] = ssh.field_v
 
     Ixx = Ixy = Iyy = None
     if args.fit_moments:
