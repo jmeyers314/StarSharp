@@ -136,6 +136,8 @@ def main(args):
             aos_fam_avg = af["aos_fam_avg"]
         except KeyError:
             aos_fam_avg = None
+    if len(src) == 0:
+        raise ValueError("No source measurements found in the input file.")
 
     # Parse the use_dof argument
     # which will in general be something like: "3-6,9,10,20-24"
