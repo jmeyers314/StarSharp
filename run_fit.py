@@ -184,7 +184,7 @@ def main(args):
     src = augment_moments(src, "aa_")
     src = augment_moments(src, "nw_")
 
-    dfit = StarSharp(
+    ssh = StarSharp(
         band = "r",
         use_dof = use_dof,
         nkeep = nkeep,
@@ -195,7 +195,7 @@ def main(args):
         tqdm = tqdm,
     )
 
-    gridded = dfit.grid_moment_measurements(
+    gridded = ssh.grid_moment_measurements(
         src["aa_x"] * MM_TO_DEGREE,
         -src["aa_y"] * MM_TO_DEGREE,  # +alt is -ve y_OCS
         src["aa_Ixx"],
@@ -205,26 +205,26 @@ def main(args):
 
     Ixx = Ixy = Iyy = None
     if args.fit_moments:
-        result = dfit.fit_moments(gridded)
+        result = ssh.fit_moments(gridded)
         Ixx = result["Ixx"]
         Ixy = result["Ixy"]
         Iyy = result["Iyy"]
     if args.fit_fam:
-        result = dfit.fit_wf(
+        result = ssh.fit_wf(
             np.rad2deg(aos_fam_avg["thx_OCS"]),
             np.rad2deg(aos_fam_avg["thy_OCS"]),
             aos_fam_avg["zk_OCS"],
             use_zk=aos_fam_avg.meta["nollIndices"],
         )
     if args.fit_corners:
-        result = dfit.fit_wf(
+        result = ssh.fit_wf(
             np.rad2deg(aos_corner_avg["thx_OCS"]),
             np.rad2deg(aos_corner_avg["thy_OCS"]),
             aos_corner_avg["zk_OCS"],
             use_zk=aos_corner_avg.meta["nollIndices"],
         )
 
-    model_moments = dfit.moments_model(result["state"])
+    model_moments = ssh.moments_model(result["state"])
 
     if Ixx is None:
         guess = [np.sqrt(1.0/2.35), np.sqrt(1.0/2.35), 0.0]
@@ -434,7 +434,7 @@ def main(args):
 
         # FAM Zernikes panels
         if do_triplet_layout and aos_fam_avg is not None:
-            model_fam_zks = dfit.wf_model(
+            model_fam_zks = ssh.wf_model(
                 np.rad2deg(aos_fam_avg["thx_OCS"]),
                 np.rad2deg(aos_fam_avg["thy_OCS"]),
                 result["state"],
@@ -481,7 +481,7 @@ def main(args):
                     sc.set_clim(-vmax, vmax)
 
         # Corner Zernikes panels
-        model_corner_zks = dfit.wf_model(
+        model_corner_zks = ssh.wf_model(
             np.rad2deg(aos_corner_avg["thx_OCS"]),
             np.rad2deg(aos_corner_avg["thy_OCS"]),
             result["state"],
@@ -508,10 +508,10 @@ def main(args):
                 at.write(f"{name:8} {dof:9.3f} {unit}")
 
         # vmode panel
-        dfit.plot_modes(*char_axs[:,0], cmap="bwr")
+        ssh.plot_modes(*char_axs[:,0], cmap="bwr")
 
         # vmode dz panel
-        dfit.plot_sens_dz(dz_ax, cmap="bwr")
+        ssh.plot_sens_dz(dz_ax, cmap="bwr")
 
         fig.savefig(args.plot)
 
