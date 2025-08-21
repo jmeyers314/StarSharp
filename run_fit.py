@@ -18,6 +18,7 @@ warnings.filterwarnings(
 )
 from star_sharp import StarSharp
 from figure import layout_singlet_figure, layout_triplet_figure
+from scipy.optimize import least_squares
 import astropy.units as u
 
 SIGMA_TO_FWHM = np.sqrt(np.log(256))
@@ -155,16 +156,6 @@ def main(args):
     if nkeep < 0:
         nkeep = None
 
-    # Debugging ...
-    # toss = np.array(
-    #     [
-    #         any(raft in row["detector"] for raft in ["R00", "R01", "R11", "R10"])
-    #         # any(raft in row["detector"] for raft in ["R40", "R41", "R30", "R31"])
-    #         for row in aos_fam_avg
-    #     ]
-    # )
-    # aos_fam_avg = aos_fam_avg[~toss]
-
     w = np.isfinite(src["Ixx"])
     w &= np.isfinite(src["Ixy"])
     w &= np.isfinite(src["Iyy"])
@@ -223,31 +214,12 @@ def main(args):
             aos_corner_avg["zk_OCS"],
             use_zk=aos_corner_avg.meta["nollIndices"],
         )
-
-    model_moments = ssh.moments_model(result["state"])
-
-    if Ixx is None:
+    if Ixx is None: # b/c we fit WF
+        model_moments = ssh.moments_model(result["state"]) # optics only
+        # Fit for Ixx, Ixy, Iyy holding optics fixed
         guess = [np.sqrt(1.0/2.35), np.sqrt(1.0/2.35), 0.0]
-        from scipy.optimize import least_squares
-        x = least_squares(conv_moments_residual, guess, args=(gridded, model_moments))
-        Ixx, Iyy, Ixy = x.x
-        # Manipulate the model to include these terms
-        model_moments["Ixx"] += Ixx
-        model_moments["Iyy"] += Iyy
-        model_moments["Ixy"] += Ixy
-        model_moments["T"] += Ixx + Iyy
-        model_moments["w1"] += Ixx - Iyy
-        model_moments["w2"] += 2*Ixy
-        model_moments["w"] = np.sqrt(model_moments["w1"]**2 + model_moments["w2"]**2)
-        model_moments["beta"] = 0.5 * np.arctan2(model_moments["w2"], model_moments["w1"])
-        model_moments["e1"] = model_moments["w1"] / model_moments["T"]
-        model_moments["e2"] = model_moments["w2"] / model_moments["T"]
-        model_moments["e"] = np.sqrt(model_moments["e1"]**2 + model_moments["e2"]**2)
-        model_moments["wx"] = model_moments["w"] * np.cos(model_moments["beta"])
-        model_moments["wy"] = model_moments["w"] * np.sin(model_moments["beta"])
-        model_moments["ex"] = model_moments["e"] * np.cos(model_moments["beta"])
-        model_moments["ey"] = model_moments["e"] * np.sin(model_moments["beta"])
-        model_moments["FWHM"] = np.sqrt(model_moments["T"]/2) * SIGMA_TO_FWHM
+        Ixx, Iyy, Ixy = least_squares(conv_moments_residual, guess, args=(gridded, model_moments)).x
+    model_moments = ssh.moments_model(result["state"], dIxx=Ixx, dIyy=Iyy, dIxy=Ixy)
 
     if args.plot is not None:
         # We'll use these a lot, so unpack here
