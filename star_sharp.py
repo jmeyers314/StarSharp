@@ -324,7 +324,7 @@ def grid_measurements(
 
     val_sums = {}
     for k in vals.keys():
-        val_sums[k] = {i:0 for i in range(len(ugrid))}
+        val_sums[k] = {i:0.0 for i in range(len(ugrid))}
     counts = {i:0 for i in range(len(ugrid))}
 
     for src_idx, dest_idx in enumerate(dest_indices):
@@ -339,7 +339,8 @@ def grid_measurements(
                 if counts[i] != 0
                 else float("nan")
                 for i in range(len(ugrid))
-            ]
+            ],
+            dtype=np.float64
         )
         for k in vals
     }
@@ -977,7 +978,8 @@ class StarSharp:
             if len(m2_bend_idx) > 0:
                 ax0.axhline(m1m3_bend_idx[-1] + 0.5, color="k", alpha=0.2)
 
-        ax0.axvspan(self.nkeep - 0.5, len(S)-0.5, color="k", alpha=0.2)
+        nkeep = self.nkeep if self.nkeep is not None else len(S)
+        ax0.axvspan(nkeep - 0.5, len(S)-0.5, color="k", alpha=0.2)
 
         ax1.plot(np.arange(1, len(S)+1), S)
         ax1.set_xlim(0.5, len(S) + 0.5)
@@ -985,7 +987,7 @@ class StarSharp:
         ax1.set_xticklabels([f"{i}" for i in range(5, len(self.use_dof)+1, 5)])
         ax1.set_yscale("log")
         ax1.set_yticks([])
-        ax1.axvspan(self.nkeep + 0.5, len(S)+0.5, color="k", alpha=0.2)
+        ax1.axvspan(nkeep + 0.5, len(S)+0.5, color="k", alpha=0.2)
 
     def plot_sens_dz(
         self,
@@ -1011,7 +1013,8 @@ class StarSharp:
         ax.set_yticklabels([f"({i},{j})" for i, j in dzs])
         ax.set_xticks([i-1 for i in range(5, len(self.use_dof)+1, 5)])
         ax.set_xticklabels([f"{i}" for i in range(5, len(self.use_dof)+1, 5)])
-        ax.axvspan(self.nkeep - 0.5, len(self.use_dof)-0.5, color="k", alpha=0.2)
+        nkeep = self.nkeep if self.nkeep is not None else len(self.use_dof)
+        ax.axvspan(nkeep - 0.5, len(self.use_dof)-0.5, color="k", alpha=0.2)
 
     def fit_moments(
         self,
