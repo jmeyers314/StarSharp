@@ -91,6 +91,7 @@ def main(args):
             aos_fam_avg = af["aos_fam_avg"]
         except KeyError:
             aos_fam_avg = None
+        visit_id = src.meta["LSST BUTLER DATAID VISIT"]  # workaround
     if len(src) == 0:
         raise ValueError("No source measurements found in the input file.")
 
@@ -195,6 +196,7 @@ def main(args):
 
         # Unpack
         fig = layout["fig"]
+        fig.suptitle(f"Visit {visit_id}")
 
         corner_axs=layout["corner_axs"]
         char_axs=layout["char_axs"]
@@ -430,11 +432,18 @@ def main(args):
 
         # Text output panel
         with AxisText(text_ax, ncols=3) as at:
-
             if args.fit_moments:
                 at.write("Moments fit")
             if args.fit_fam or args.fit_corners:
                 at.write("Wavefront fit")
+            at.write()
+            at.write(f"ext Ixx  {Ixx:9.3f} arcsec²")
+            at.write(f"ext Iyy  {Iyy:9.3f} arcsec²")
+            at.write(f"ext Ixy  {Ixy:9.3f} arcsec²")
+            at.write(f"ext FWHM {np.sqrt(0.5*(Ixx+Iyy))*SIGMA_TO_FWHM:9.3f} arcsec")
+            at.write(f"ext e1   {(Ixx-Iyy)/(Ixx+Iyy):9.3f}")
+            at.write(f"ext e2   {2*Ixy/(Ixx+Iyy):9.3f}")
+            at.write()
             for i, dof in enumerate(result["state"]):
                 name, unit = ALL_DOFS[use_dof[i]]
                 at.write(f"{name:8} {dof:9.3f} {unit}")
