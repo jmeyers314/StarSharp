@@ -17,7 +17,7 @@ warnings.filterwarnings(
     category=asdf.exceptions.AsdfPackageVersionWarning
 )
 from star_sharp import StarSharp
-from figure import layout_singlet_figure, layout_triplet_figure
+from figure import layout_singlet_figure, layout_triplet_figure, AxisText
 from scipy.optimize import least_squares
 import astropy.units as u
 
@@ -34,52 +34,6 @@ for pod in ["M2", "Cam"]:
 for mirror in ["M1M3", "M2"]:
     for i in range(1, 21):
         ALL_DOFS.append((f"{mirror} B{i}", "micron"))
-
-
-class AxisText:
-    def __init__(self, ax, x=0.01, y=0.99, width=None, height=None, max_lines=20, ncols=1):
-        """
-        ax: matplotlib axis
-        x, y: starting position in axis coordinates
-        max_lines: maximum number of lines per column
-        ncols: number of columns
-        """
-        self.ax = ax
-        self.x = x
-        self.y = y
-        self.max_lines = max_lines
-        self.ncols = ncols
-        self.buf = []
-        if width is None:
-            width = 1.0 - x
-        if height is None:
-            height = y
-        self.col_width = width / ncols
-        self.line_height = height / max_lines
-
-    def write(self, *objects, sep=" ", end="\n"):
-        self.buf.append(sep.join(map(str, objects)) + end)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        text_str = ''.join(self.buf)
-        lines = text_str.splitlines()
-
-        for col in range(self.ncols):
-            col_lines = lines[col*self.max_lines:(col+1)*self.max_lines]
-            if not col_lines:
-                continue
-            for i, line in enumerate(col_lines):
-                self.ax.text(
-                    self.x + col*self.col_width,
-                    self.y - i*self.line_height,
-                    line,
-                    transform=self.ax.transAxes,
-                    ha='left', va='top',
-                    family='monospace'
-                )
 
 def apply_transform(table, transform, prefix):
     transform = LinearTransform(transform)

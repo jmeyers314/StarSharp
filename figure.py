@@ -4,6 +4,73 @@ import numpy as np
 from matplotlib.figure import Figure
 
 
+def colorbar(mappable):
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    import matplotlib.pyplot as plt
+    last_axes = plt.gca()
+    ax = mappable.axes
+    fig = ax.figure
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cbar = fig.colorbar(mappable, cax=cax)
+    plt.sca(last_axes)
+    return cbar
+
+
+class AxisText:
+    def __init__(
+        self,
+        ax,
+        x=0.01,
+        y=0.99,
+        width=None,
+        height=None,
+        max_lines=20,
+        ncols=1
+    ):
+        """
+        ax: matplotlib axis
+        x, y: starting position in axis coordinates
+        max_lines: maximum number of lines per column
+        ncols: number of columns
+        """
+        self.ax = ax
+        self.x = x
+        self.y = y
+        self.max_lines = max_lines
+        self.ncols = ncols
+        self.buf = []
+        if width is None:
+            width = 1.0 - x
+        if height is None:
+            height = y
+        self.col_width = width / ncols
+        self.line_height = height / max_lines
+
+    def write(self, *objects, sep=" ", end="\n"):
+        self.buf.append(sep.join(map(str, objects)) + end)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        text_str = ''.join(self.buf)
+        lines = text_str.splitlines()
+
+        for col in range(self.ncols):
+            col_lines = lines[col*self.max_lines:(col+1)*self.max_lines]
+            if not col_lines:
+                continue
+            for i, line in enumerate(col_lines):
+                self.ax.text(
+                    self.x + col*self.col_width,
+                    self.y - i*self.line_height,
+                    line,
+                    transform=self.ax.transAxes,
+                    ha='left', va='top',
+                    family='monospace'
+                )
+
 def layout_triplet_figure():
 
     fig = Figure(figsize=(28, 15.75))
