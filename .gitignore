@@ -1,1 +1,9 @@
 __pycache__
+data/
+png/
+*.png
+.DS_Store
+transverse_sensitivity*.asdf
+wf_sensitivity*.asdf
+
+
