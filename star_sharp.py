@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from scipy.spatial import KDTree
 
+
 FloatArray = Union[
     Sequence[float],
     NDArray[np.floating],
@@ -942,14 +943,14 @@ class StarSharp:
         self,
         u: NDArray[np.float64],
         v: NDArray[np.float64],
-        x: NDArray[np.float64],  # state
+        state: NDArray[np.float64],
         use_zk: NDArray[np.int64],
         zk: NDArray[np.float64],
     ) -> NDArray[np.float64]:
         if self.nkeep is not None:
-            x = self.orthogonal_to_nominal(x)
+            state = self.orthogonal_to_nominal(state)
         test_wf = self.wf_model(
-            x, u=u, v=v, include_intrinsic=False
+            u=u, v=v, state=state, include_intrinsic=False
         )
         return (test_wf - zk)[:, use_zk].ravel()
 
@@ -978,7 +979,6 @@ class StarSharp:
 
         ax0.axvspan(self.nkeep - 0.5, len(S)-0.5, color="k", alpha=0.2)
 
-        # ax1.step(np.arange(1, len(S)+1)+0.5, S)
         ax1.plot(np.arange(1, len(S)+1), S)
         ax1.set_xlim(0.5, len(S) + 0.5)
         ax1.set_xticks([i for i in range(5, len(self.use_dof)+1, 5)])
@@ -1043,7 +1043,7 @@ class StarSharp:
         v: NDArray[np.float64],
         zk: NDArray[np.float64],
         use_zk: Optional[IntegerArray] = None,
-    ) -> NDArray[np.float64]:
+    ) -> dict[str, ScalarOrArray]:
         if use_zk is None:
             use_zk = list(range(4, self.wf_jmax + 1))
 
@@ -1078,5 +1078,5 @@ class StarSharp:
         v: FloatArray,
         wf_measurements: FloatArray,
         use_zk: Optional[IntegerArray] = None,
-    ) -> NDArray[np.float64]:
+    ) -> dict[str, ScalarOrArray]:
         pass

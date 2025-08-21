@@ -120,14 +120,14 @@ def main(args):
     aaRot = np.array([[crtp, srtp], [-srtp, crtp]]) @ np.array([[0, 1], [1, 0]]) @ np.array([[-1, 0], [0, 1]])
     src = apply_transform(src, aaRot, "aa")
 
-    rsp = src.meta["rotSkyPos"]
-    srsp, crsp = np.sin(rsp), np.cos(rsp)
-    nwRot = np.array([[crsp, -srsp], [srsp, crsp]])
-    src = apply_transform(src, nwRot, "nw")
+    # rsp = src.meta["rotSkyPos"]
+    # srsp, crsp = np.sin(rsp), np.cos(rsp)
+    # nwRot = np.array([[crsp, -srsp], [srsp, crsp]])
+    # src = apply_transform(src, nwRot, "nw")
 
     src = augment_moments(src, "")
     src = augment_moments(src, "aa_")
-    src = augment_moments(src, "nw_")
+    # src = augment_moments(src, "nw_")
 
     ssh = StarSharp(
         band = "r",
