@@ -48,6 +48,9 @@ WAVELENGTHS = dict(
 )
 
 
+SIGMA_TO_FWHM = np.sqrt(np.log(256))
+
+
 def spot_size(
     optic: batoid.Optic,
     wavelength: float,
@@ -953,7 +956,22 @@ class StarSharp:
         test_wf = self.wf_model(
             u=u, v=v, state=state, include_intrinsic=False
         )
-        return (test_wf - zk)[:, use_zk].ravel()
+        return (test_wf[:, use_zk] - zk).ravel()
+
+    def _combined_residual(
+        self,
+        x: NDArray[np.float64],  # state + dIxx/xy/yy
+        gridded_moment_measurements: dict[str, NDArray[np.float64]],
+        u: NDArray[np.float64],
+        v: NDArray[np.float64],
+        zk: NDArray[np.float64],
+        use_zk: NDArray[np.int64],
+    ) -> NDArray[np.float64]:
+        # Equally weighted for now
+        return np.concatenate([
+            self._moments_residual(x, gridded_moment_measurements),
+            self._wf_residual(u, v, state=x[:-3], use_zk=use_zk, zk=zk)
+        ])
 
     def plot_modes(
         self,
@@ -1081,5 +1099,23 @@ class StarSharp:
         v: FloatArray,
         wf_measurements: FloatArray,
         use_zk: Optional[IntegerArray] = None,
+        **kwargs,
     ) -> dict[str, ScalarOrArray]:
-        pass
+        nguess = len(self.use_dof) if self.nkeep is None else self.nkeep
+        guess = [0]*nguess + [(1.0 / SIGMA_TO_FWHM)**2] * 2 + [0]
+        result = least_squares(
+            self._combined_residual,
+            guess,
+            args=(gridded_moment_measurements, u, v, wf_measurements, use_zk),
+            **kwargs
+        )
+        assert len(result.x) == nguess + 3
+        dof = self.orthogonal_to_nominal(result.x[:-3])
+        Ixx, Ixy, Iyy = result.x[-3:]
+        result = dict(
+            state=dof,
+            Ixx=float(Ixx),
+            Ixy=float(Ixy),
+            Iyy=float(Iyy),
+        )
+        return result

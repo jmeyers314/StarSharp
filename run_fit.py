@@ -156,30 +156,51 @@ def main(args):
     gridded["v"] = ssh.field_v
 
     Ixx = Ixy = Iyy = None
-    if args.fit_moments:
+    # If either wavefront is selected, start assembling inputs
+    if args.fit_corners or args.fit_fam:
+        thx = None
+        if args.fit_corners:
+            thx = np.rad2deg(aos_corner_avg["thx_OCS"])
+            thy = np.rad2deg(aos_corner_avg["thy_OCS"])
+            zk = aos_corner_avg["zk_OCS"]
+            use_zk = aos_corner_avg.meta["nollIndices"]
+        if args.fit_fam:
+            if aos_fam_avg is None:
+                raise ValueError("No full array mode data available.")
+            if thx is None:
+                thx = np.rad2deg(aos_fam_avg["thx_OCS"])
+                thy = np.rad2deg(aos_fam_avg["thy_OCS"])
+                zk = aos_fam_avg["zk_OCS"]
+                use_zk = aos_fam_avg.meta["nollIndices"]
+            else:
+                assert np.all(aos_fam_avg.meta["nollIndices"] == use_zk)
+                thx = np.concatenate([thx, np.rad2deg(aos_fam_avg["thx_OCS"])])
+                thy = np.concatenate([thy, np.rad2deg(aos_fam_avg["thy_OCS"])])
+                zk = np.concatenate([zk, aos_fam_avg["zk_OCS"]])
+        if args.fit_moments:
+            result = ssh.fit_both(
+                gridded,
+                thx,
+                thy,
+                zk,
+                use_zk=use_zk,
+            )
+            Ixx = result["Ixx"]
+            Ixy = result["Ixy"]
+            Iyy = result["Iyy"]
+        else:  # Only WF
+            result = ssh.fit_wf(thx, thy, zk, use_zk=use_zk)
+            model_moments = ssh.moments_model(result["state"]) # optics only
+            # Fit for Ixx, Ixy, Iyy holding optics fixed
+            guess = [np.sqrt(1.0/2.35), np.sqrt(1.0/2.35), 0.0]
+            Ixx, Iyy, Ixy = least_squares(conv_moments_residual, guess, args=(gridded, model_moments)).x
+    else:
+        if not args.fit_moments:
+            raise ValueError("At least one of --fit_moments, --fit_fam, or --fit_corners must be specified.")
         result = ssh.fit_moments(gridded)
         Ixx = result["Ixx"]
         Ixy = result["Ixy"]
         Iyy = result["Iyy"]
-    if args.fit_fam:
-        result = ssh.fit_wf(
-            np.rad2deg(aos_fam_avg["thx_OCS"]),
-            np.rad2deg(aos_fam_avg["thy_OCS"]),
-            aos_fam_avg["zk_OCS"],
-            use_zk=aos_fam_avg.meta["nollIndices"],
-        )
-    if args.fit_corners:
-        result = ssh.fit_wf(
-            np.rad2deg(aos_corner_avg["thx_OCS"]),
-            np.rad2deg(aos_corner_avg["thy_OCS"]),
-            aos_corner_avg["zk_OCS"],
-            use_zk=aos_corner_avg.meta["nollIndices"],
-        )
-    if Ixx is None: # b/c we fit WF
-        model_moments = ssh.moments_model(result["state"]) # optics only
-        # Fit for Ixx, Ixy, Iyy holding optics fixed
-        guess = [np.sqrt(1.0/2.35), np.sqrt(1.0/2.35), 0.0]
-        Ixx, Iyy, Ixy = least_squares(conv_moments_residual, guess, args=(gridded, model_moments)).x
     model_moments = ssh.moments_model(result["state"], dIxx=Ixx, dIyy=Iyy, dIxy=Ixy)
 
     if args.plot is not None:
