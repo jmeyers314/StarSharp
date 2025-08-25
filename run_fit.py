@@ -197,12 +197,35 @@ def main(args):
         Iyy = result["Iyy"]
     model_moments = ssh.moments_model(result["state"], dIxx=Ixx, dIyy=Iyy, dIxy=Ixy)
     opt_moments = ssh.moments_model(result["state"])
-    # resid_moments = {
-    #     "Ixx": gridded["Ixx"] - model_moments["Ixx"],
-    #     "Iyy": gridded["Iyy"] - model_moments["Iyy"],
-    #     "Ixy": gridded["Ixy"] - model_moments["Ixy"]
-    # }
-    # resid_moments = augment_moments(resid_moments, "")
+
+    if aos_fam_avg is not None:
+        model_fam_zks = ssh.wf_model(
+            np.rad2deg(aos_fam_avg["thx_OCS"]),
+            np.rad2deg(aos_fam_avg["thy_OCS"]),
+            result["state"],
+        )
+    model_corner_zks = ssh.wf_model(
+        np.rad2deg(aos_corner_avg["thx_OCS"]),
+        np.rad2deg(aos_corner_avg["thy_OCS"]),
+        result["state"],
+    )
+    if args.asdf is not None:
+        tree = dict(
+            args=vars(args),
+            Ixx=Ixx,
+            Iyy=Iyy,
+            Ixy=Ixy,
+            gridded=gridded,
+            model_moments=model_moments,
+            opt_moments=opt_moments,
+            model_corner_zks=model_corner_zks,
+        )
+        if aos_fam_avg is not None:
+            tree.update(dict(
+                model_fam_zks=model_fam_zks,
+            ))
+        with asdf.AsdfFile(tree) as af:
+            af.write_to(args.asdf)
 
     if args.plot is not None:
         # We'll use these a lot, so unpack here
@@ -382,11 +405,6 @@ def main(args):
 
         # FAM Zernikes panels
         if do_triplet_layout and aos_fam_avg is not None:
-            model_fam_zks = ssh.wf_model(
-                np.rad2deg(aos_fam_avg["thx_OCS"]),
-                np.rad2deg(aos_fam_avg["thy_OCS"]),
-                result["state"],
-            )
             zk_kwargs = dict(s=20, cmap="bwr")
             for [ax0, ax1, ax2], j in zip(zk_axs.T, range(4, 28+1)):
                 # Use this vmax initially, if there's data, we'll reset it.
@@ -429,11 +447,6 @@ def main(args):
                     sc.set_clim(-vmax, vmax)
 
         # Corner Zernikes panels
-        model_corner_zks = ssh.wf_model(
-            np.rad2deg(aos_corner_avg["thx_OCS"]),
-            np.rad2deg(aos_corner_avg["thy_OCS"]),
-            result["state"],
-        )
         for row, model_zk in zip(aos_corner_avg, model_corner_zks):
             i = int(row["detector"][1])//4
             j = int(row["detector"][2])//4
@@ -493,5 +506,6 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--plot_triplet", action="store_true", help="Plot as triplet figure layout")
     group.add_argument("--plot_singlet", action="store_true", help="Plot as singlet figure layout")
+    parser.add_argument("--asdf", type=str, default=None, help="Filename for ASDF output")
     args = parser.parse_args()
     main(args)
