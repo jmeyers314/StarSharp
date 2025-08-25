@@ -26,14 +26,14 @@ MM_TO_DEGREE = 100*0.2/3600
 
 ALL_DOFS = []
 for pod in ["M2", "Cam"]:
-    ALL_DOFS.append((f"{pod} dz", "micron"))
-    ALL_DOFS.append((f"{pod} dx", "micron"))
-    ALL_DOFS.append((f"{pod} dy", "micron"))
+    ALL_DOFS.append((f"{pod} dz", "μm"))
+    ALL_DOFS.append((f"{pod} dx", "μm"))
+    ALL_DOFS.append((f"{pod} dy", "μm"))
     ALL_DOFS.append((f"{pod} rx", "arcsec"))
     ALL_DOFS.append((f"{pod} ry", "arcsec"))
 for mirror in ["M1M3", "M2"]:
     for i in range(1, 21):
-        ALL_DOFS.append((f"{mirror} B{i}", "micron"))
+        ALL_DOFS.append((f"{mirror} B{i}", "μm"))
 
 def apply_transform(table, transform, prefix):
     transform = LinearTransform(transform)
@@ -121,14 +121,8 @@ def main(args):
     aaRot = np.array([[crtp, srtp], [-srtp, crtp]]) @ np.array([[0, 1], [1, 0]]) @ np.array([[-1, 0], [0, 1]])
     src = apply_transform(src, aaRot, "aa")
 
-    # rsp = src.meta["rotSkyPos"]
-    # srsp, crsp = np.sin(rsp), np.cos(rsp)
-    # nwRot = np.array([[crsp, -srsp], [srsp, crsp]])
-    # src = apply_transform(src, nwRot, "nw")
-
     src = augment_moments(src, "")
     src = augment_moments(src, "aa_")
-    # src = augment_moments(src, "nw_")
 
     ssh = StarSharp(
         band = "r",
@@ -146,7 +140,7 @@ def main(args):
         -src["aa_y"] * MM_TO_DEGREE,  # +ve alt is -ve y_OCS
         {
             "Ixx":src["aa_Ixx"],
-            "Ixy":-src["aa_Ixy"], #+ve alt is -ve y_OCS
+            "Ixy":-src["aa_Ixy"], # +ve alt is -ve y_OCS
             "Iyy":src["aa_Iyy"]
         },
         ssh.field_u, ssh.field_v,
@@ -202,6 +196,13 @@ def main(args):
         Ixy = result["Ixy"]
         Iyy = result["Iyy"]
     model_moments = ssh.moments_model(result["state"], dIxx=Ixx, dIyy=Iyy, dIxy=Ixy)
+    opt_moments = ssh.moments_model(result["state"])
+    # resid_moments = {
+    #     "Ixx": gridded["Ixx"] - model_moments["Ixx"],
+    #     "Iyy": gridded["Iyy"] - model_moments["Iyy"],
+    #     "Ixy": gridded["Ixy"] - model_moments["Ixy"]
+    # }
+    # resid_moments = augment_moments(resid_moments, "")
 
     if args.plot is not None:
         # We'll use these a lot, so unpack here
@@ -233,7 +234,7 @@ def main(args):
         w_cax = layout["w_cax"]
 
         # Moments panels
-        s = 30 if not do_triplet_layout else 10
+        s = 40 if not do_triplet_layout else 10
         T_kwargs = dict(s=s, vmin=0.0, vmax=2.0, cmap="turbo")
         w_kwargs = dict(s=s, vmin=-0.5, vmax=0.5, cmap="bwr")
         T_scatter = moments_axs[0, 0].scatter(
@@ -258,7 +259,6 @@ def main(args):
         moments_axs[1, 0].scatter(
             u,
             v,
-            # c=model_moments["T"] + np.nanmean(gridded["T"]) - np.nanmean(model_moments["T"]),
             c=model_moments["T"],
             **T_kwargs,
         )
@@ -277,7 +277,6 @@ def main(args):
         moments_axs[2, 0].scatter(
             u,
             v,
-            # c=gridded["T"] - model_moments["T"] - np.nanmean(gridded["T"]) + np.nanmean(model_moments["T"]),
             c=gridded["T"] - model_moments["T"],
             **w_kwargs,
         )
@@ -376,12 +375,6 @@ def main(args):
             **e_kwargs
         )
 
-        for ax in chain(moments_axs.flat, shape_axs.flat, zk_axs.flat if "zk_axs" in layout else []):
-            th = np.linspace(0, 2 * np.pi, 100)
-            x = 1.75 * np.cos(th)
-            y = 1.75 * np.sin(th)
-            ax.plot(x, y, color="black", lw=0.25)
-
         fig.colorbar(T_scatter, cax=Tsqr_cax, label="arcsec$^2$")
         fig.colorbar(w_scatter, cax=w_cax, label="arcsec$^2$")
         fig.colorbar(fwhm_scatter, cax=fwhm_cax, label="arcsec")
@@ -453,21 +446,26 @@ def main(args):
 
         # Text output panel
         with AxisText(text_ax, ncols=3) as at:
+            fit_str = "fit:"
             if args.fit_moments:
-                at.write("Moments fit")
-            if args.fit_fam or args.fit_corners:
-                at.write("Wavefront fit")
+                fit_str += " moments"
+            if args.fit_fam:
+                fit_str += " fam"
+            if args.fit_corners:
+                fit_str += " corners"
+            at.write(fit_str)
+            at.write(f"opt FWHM {np.nanmean(opt_moments["FWHM"]):8.3f} arcsec")
             at.write()
-            at.write(f"ext Ixx  {Ixx:9.3f} arcsec²")
-            at.write(f"ext Iyy  {Iyy:9.3f} arcsec²")
-            at.write(f"ext Ixy  {Ixy:9.3f} arcsec²")
-            at.write(f"ext FWHM {np.sqrt(0.5*(Ixx+Iyy))*SIGMA_TO_FWHM:9.3f} arcsec")
-            at.write(f"ext e1   {(Ixx-Iyy)/(Ixx+Iyy):9.3f}")
-            at.write(f"ext e2   {2*Ixy/(Ixx+Iyy):9.3f}")
+            at.write(f"ext Ixx  {Ixx:8.3f} arcsec²")
+            at.write(f"ext Iyy  {Iyy:8.3f} arcsec²")
+            at.write(f"ext Ixy  {Ixy:8.3f} arcsec²")
+            at.write(f"ext FWHM {np.sqrt(0.5*(Ixx+Iyy))*SIGMA_TO_FWHM:8.3f} arcsec")
+            at.write(f"ext e1   {(Ixx-Iyy)/(Ixx+Iyy):8.3f}")
+            at.write(f"ext e2   {2*Ixy/(Ixx+Iyy):8.3f}")
             at.write()
             for i, dof in enumerate(result["state"]):
                 name, unit = ALL_DOFS[use_dof[i]]
-                at.write(f"{name:8} {dof:9.3f} {unit}")
+                at.write(f"{name:8} {dof:8.3f} {unit}")
 
         # vmode panel
         ssh.plot_modes(*char_axs[:,0], cmap="bwr")

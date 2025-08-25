@@ -239,6 +239,12 @@ def layout_triplet_figure():
     Tsqr_cax = fig.add_axes([0.935, 0.04, 0.005, 0.3])
     w_cax = fig.add_axes([0.965, 0.04, 0.005, 0.3])
 
+    for ax in chain(moments_axs.flat, shape_axs.flat, zk_axs.flat):
+        th = np.linspace(0, 2 * np.pi, 100)
+        x = 1.75 * np.cos(th)
+        y = 1.75 * np.sin(th)
+        ax.plot(x, y, color="black", lw=0.25)
+
     return dict(
         fig=fig,
 
@@ -255,8 +261,6 @@ def layout_triplet_figure():
         moments_axs=moments_axs,
         Tsqr_cax=Tsqr_cax,
         w_cax=w_cax,
-
-        size=5,
     )
 
 
@@ -357,6 +361,9 @@ def layout_singlet_figure():
     shape_axs[0, 1].set_title("FWHM")
     shape_axs[0, 2].set_title("e1")
     shape_axs[0, 3].set_title("e2")
+    shape_axs[0, 0].set_ylabel("Data")
+    shape_axs[1, 0].set_ylabel("Model")
+    shape_axs[2, 0].set_ylabel("Resid")
     fwhm_cax = fig.add_axes([0.49, 0.06, 0.01, 0.6])
     ellip_cax = fig.add_axes([0.52, 0.06, 0.01, 0.6])
 
@@ -381,8 +388,17 @@ def layout_singlet_figure():
     moments_axs[0, 0].set_title("Ixx + Iyy")
     moments_axs[0, 1].set_title("Ixx - Iyy")
     moments_axs[0, 2].set_title("2 Ixy")
+    moments_axs[0, 0].set_ylabel("Data")
+    moments_axs[1, 0].set_ylabel("Model")
+    moments_axs[2, 0].set_ylabel("Resid")
     Tsqr_cax = fig.add_axes([0.915, 0.06, 0.01, 0.6])
     w_cax = fig.add_axes([0.95, 0.06, 0.01, 0.6])
+
+    for ax in chain(moments_axs.flat, shape_axs.flat):
+        th = np.linspace(0, 2 * np.pi, 100)
+        x = 1.75 * np.cos(th)
+        y = 1.75 * np.sin(th)
+        ax.plot(x, y, color="black", lw=0.25)
 
     return dict(
         fig=fig,
@@ -399,5 +415,4 @@ def layout_singlet_figure():
         moments_axs=moments_axs,
         Tsqr_cax=Tsqr_cax,
         w_cax=w_cax,
-        size=10,
     )
