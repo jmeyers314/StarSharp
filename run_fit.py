@@ -132,6 +132,7 @@ def main(args):
         transverse_field_radii = args.transverse_field_radii,
         wf_kmax = args.wf_kmax,
         wf_jmax = args.wf_jmax,
+        ortho_transverse = args.ortho_transverse,
         tqdm = tqdm,
     )
 
@@ -507,5 +508,6 @@ if __name__ == "__main__":
     group.add_argument("--plot_triplet", action="store_true", help="Plot as triplet figure layout")
     group.add_argument("--plot_singlet", action="store_true", help="Plot as singlet figure layout")
     parser.add_argument("--asdf", type=str, default=None, help="Filename for ASDF output")
+    parser.add_argument("--ortho-transverse", action="store_true", help="Use transverse sensitivity to orthogonalize")
     args = parser.parse_args()
     main(args)

@@ -371,6 +371,8 @@ class StarSharp:
         Maximum field index for sensitivity matrix and intrinsic Zernikes.
     wf_jmax : int, optional
         Maximum pupil index for sensitivity matrix and intrinsic Zernikes.
+    ortho_transverse : bool, optional
+        Use transverse sensitivity to orthogonalize.
     tqdm : callable, optional
         Optional progressbar callable.
     """
@@ -383,6 +385,7 @@ class StarSharp:
         transverse_field_radii: int = 14,
         wf_kmax: int = 15,
         wf_jmax: int = 28,
+        ortho_transverse: bool = False,
         tqdm: Optional[Callable] = None,
     ) -> None:
         # Use builder instead of fiducial so don't need to pass in
@@ -397,6 +400,7 @@ class StarSharp:
         self.transverse_field_radii = transverse_field_radii
         self.wf_kmax = wf_kmax
         self.wf_jmax = wf_jmax
+        self.ortho_transverse = ortho_transverse
         self.tqdm = tqdm
 
         self.n_dof = len(self.builder.dof)
@@ -728,11 +732,9 @@ class StarSharp:
         )
 
     @cached_property
-    def _transverse_double_zernikes(
-        self,
-        kmax: int = 15,
-        jmax: int = 28,
-    ) -> NDArray[np.float64]:
+    def _transverse_double_zernikes(self) -> NDArray[np.float64]:
+        kmax = self.wf_kmax
+        jmax = self.wf_jmax
         u = np.repeat(self.field_u, self.n_pupil)
         v = np.repeat(self.field_v, self.n_pupil)
         x = np.tile(self.pupil_x, self.n_field)
@@ -771,14 +773,17 @@ class StarSharp:
         tdz[:, :, :, :2] = 0.0
         return tdz
 
-    def _svd(
-        self,
-    ):
-        factor1 = (self._ranges * self._moments_power)[:, None, None, None]
-        factor2 = self._transverse_double_zernikes
+    @cached_property
+    def _svd(self):
+        if self.ortho_transverse:
+            factor2 = self._transverse_double_zernikes
+        else:
+            factor2 = self.A
+        sh = (-1,) + tuple([1]*(factor2.ndim-1))
+        factor1 = (self._ranges * self._moments_power).reshape(sh)
         A = factor1 * factor2
         A = A[self.use_dof]
-        A = A.reshape(A.shape[0], -1)
+        A = A.reshape(len(self.use_dof), -1)
         U, S, Vh = np.linalg.svd(A, full_matrices=False)
         return U, S, Vh
 
@@ -788,7 +793,7 @@ class StarSharp:
     ):
         if self.nkeep is None:
             return state
-        U, S, Vh = self._svd()
+        U, S, Vh = self._svd
         assert len(state) == self.nkeep
         return U[:, :self.nkeep] @ state
 
@@ -979,7 +984,7 @@ class StarSharp:
         ax1: "Axes",
         **kwargs,
     ):
-        U, S, Vh = self._svd()
+        U, S, Vh = self._svd
         ax0.imshow(U, origin="lower", aspect="auto", **kwargs)
         # Show breaks between hexapods and mirrors
         m2_hex_idx = np.where(self.use_dof < 5)[0]
@@ -1015,7 +1020,7 @@ class StarSharp:
         # Declare that interesting DZs to plot are
         dzs = [(k, j) for j in range(4, 8+1) for k in range(1, 3+1)]
         dzs.extend([(1, j) for j in range(9, 15+1)])
-        rot, S, Vh = self._svd()
+        rot, S, Vh = self._svd
         A = self.A[self.use_dof]
         # sensitivity of each vmode
         Achar = np.einsum("ab,ajk->bjk", rot, A)
@@ -1079,7 +1084,7 @@ class StarSharp:
         dzk = dzk.reshape(-1)
 
         if self.nkeep is not None:
-            U, S, Vh = self._svd()
+            U, S, Vh = self._svd
             A = U[:, :self.nkeep].T @ A
 
         state, *_ = np.linalg.lstsq(A.T, dzk, rcond=None)
