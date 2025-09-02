@@ -534,6 +534,13 @@ class StarSharp:
         steps += [0.1] * 40  # bending modes
         return np.array(steps)
 
+    @property
+    def dof_signs(self) -> NDArray[np.float64]:
+        signs = np.ones(self.n_dof, dtype=float)
+        signs[[0, 1, 3, 5, 6, 8]] = -1  # flip z and y coords
+        signs[list(range(30, 50))] = -1  # flip M2 response
+        return signs
+
     def _build_transverse_sensitivity(self) -> None:
         """Build the transverse aberration sensitivities.
         """
@@ -559,9 +566,9 @@ class StarSharp:
         bar = None
         if self.tqdm is not None:
             bar = self.tqdm(total=self.n_dof, desc="Building transverse sensitivity")
-        for idof, step in enumerate(self._steps):
+        for idof, (step, sign) in enumerate(zip(self._steps, self.dof_signs)):
             dof = np.zeros(self.n_dof)
-            dof[idof] = step
+            dof[idof] = step * sign
             perturbed = self.builder.with_aos_dof(dof).build()
             for ith, (u, v) in enumerate(zip(self.field_u, self.field_v)):
                 rays = batoid.RayVector.fromStop(
