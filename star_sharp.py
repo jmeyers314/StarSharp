@@ -740,6 +740,18 @@ class StarSharp:
 
     @cached_property
     def _transverse_double_zernikes(self) -> NDArray[np.float64]:
+        fn = "transverse_double_zernikes_"
+        fn += self.band
+        fn += f"_{self.transverse_field_radii}"
+        fn += f"_{self.transverse_pupil_radii}"
+        fn += f"_{self.wf_kmax}_{self.wf_jmax}"
+        fn += ".asdf"
+        path = Path(fn)
+        if path.is_file():
+            with asdf.open(path, lazy_load=False) as af:
+                tdz = af["tdz"]
+                return tdz
+
         kmax = self.wf_kmax
         jmax = self.wf_jmax
         u = np.repeat(self.field_u, self.n_pupil)
@@ -771,13 +783,19 @@ class StarSharp:
         )
         dz_basis = dz_basis.reshape(-1, dz_basis.shape[-1])  # ravel the jk indices
         tdz = np.empty((self.n_dof, 2, kmax + 1, jmax + 1))
-        xycoefs, *_ = np.linalg.lstsq(dz_basis.T, np.concatenate([dx, dy]).T)
+        xycoefs, *_ = np.linalg.lstsq(dz_basis.T, np.concatenate([dx, dy]).T, rcond=None)
         tdz[:, 0] = xycoefs[:, :self.n_dof].T.reshape((self.n_dof, kmax + 1, jmax + 1))
         tdz[:, 1] = xycoefs[:, self.n_dof:].T.reshape((self.n_dof, kmax + 1, jmax + 1))
         # k=0 and j=0 are unused
         # We also don't care about constant pupil terms
         tdz[:, :, 0, :] = 0.0
         tdz[:, :, :, :2] = 0.0
+        with asdf.AsdfFile(
+            {
+                "tdz":tdz,
+            }
+        ) as af:
+            af.write_to(path)
         return tdz
 
     @cached_property
