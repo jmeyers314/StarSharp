@@ -1,7 +1,7 @@
 import numpy as np
 import astropy.units as u
 import asdf
-from lsst.daf.butler import Butler
+from lsst.daf.butler import Butler, DatasetNotFoundError
 from tqdm import tqdm
 from astropy.table import vstack
 
@@ -18,9 +18,9 @@ from astropy.table import vstack
 #   "u/brycek/aos_lsstcam_triplets_inFocusVisits_wavefront_step2/danish_dense/wep_v14_13_1/donut_viz_v2_0_4",  # corner mode
 
 
-def makeTableFromSourceCatalogs(srcs, visitInfo):
+def makeTableFromSourceCatalogs(srcs, visitInfo, desc):
     tables = []
-    for det, src in tqdm(srcs.items()):
+    for det, src in tqdm(srcs.items(), desc=desc, leave=False):
         tab = src.asAstropy()
         w = tab["calib_psf_candidate"]
         tab = tab[w]
@@ -59,12 +59,21 @@ def main(args):
         where=args.where,
     )
 
-    for record in records:
+    for record in tqdm(records, desc="Records"):
         day_obs = record.day_obs
         seq_num = record.seq_num
         visitInfo = None
+
+        try:
+            aos_corner_avg = butler.get("aggregateAOSVisitTableAvg", day_obs=day_obs, seq_num=seq_num)
+            aos_corner_raw = butler.get("aggregateAOSVisitTableRaw", day_obs=day_obs, seq_num=seq_num)
+        except DatasetNotFoundError:
+            continue
+
+        desc = f"{day_obs=} {seq_num=}"
         srcs = {}
-        for det in tqdm(range(189)):
+        # Outer tqdm for detectors, nested inside records tqdm
+        for det in tqdm(range(189), desc=f"Reading detectors {desc}", leave=False):
             dataId = dict(
                 day_obs=day_obs,
                 seq_num=seq_num,
@@ -72,16 +81,16 @@ def main(args):
             )
             try:
                 srcs[det] = butler.get("single_visit_star_footprints", **dataId)
-            except:
+            except DatasetNotFoundError:
                 continue
             if visitInfo is None:
                 try:
                     visitInfo = butler.get("post_isr_image.visitInfo", **dataId)
-                except:
+                except DatasetNotFoundError:
                     continue
-        src = makeTableFromSourceCatalogs(srcs, visitInfo)
-        aos_corner_avg = butler.get("aggregateAOSVisitTableAvg", day_obs=day_obs, seq_num=seq_num)
-        aos_corner_raw = butler.get("aggregateAOSVisitTableRaw", day_obs=day_obs, seq_num=seq_num)
+        if len(srcs) == 0:
+            continue
+        src = makeTableFromSourceCatalogs(srcs, visitInfo, desc=f"Consolidating detectors {desc}")
 
         with asdf.AsdfFile(
             {
