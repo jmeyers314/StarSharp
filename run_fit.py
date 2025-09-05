@@ -185,7 +185,7 @@ def main(args):
             Iyy = result["Iyy"]
         else:  # Only WF
             result = ssh.fit_wf(thx, thy, zk, use_zk=use_zk)
-            model_moments = ssh.moments_model(result["state"]) # optics only
+            model_moments = ssh.moments_model(xstate=result["xstate"]) # optics only
             # Fit for Ixx, Ixy, Iyy holding optics fixed
             guess = [np.sqrt(1.0/2.35), np.sqrt(1.0/2.35), 0.0]
             Ixx, Iyy, Ixy = least_squares(conv_moments_residual, guess, args=(gridded, model_moments)).x
@@ -196,19 +196,19 @@ def main(args):
         Ixx = result["Ixx"]
         Ixy = result["Ixy"]
         Iyy = result["Iyy"]
-    model_moments = ssh.moments_model(result["state"], dIxx=Ixx, dIyy=Iyy, dIxy=Ixy)
-    opt_moments = ssh.moments_model(result["state"])
+    model_moments = ssh.moments_model(xstate=result["xstate"], dIxx=Ixx, dIyy=Iyy, dIxy=Ixy)
+    opt_moments = ssh.moments_model(xstate=result["xstate"])
 
     if aos_fam_avg is not None:
         model_fam_zks = ssh.wf_model(
             np.rad2deg(aos_fam_avg["thx_OCS"]),
             np.rad2deg(aos_fam_avg["thy_OCS"]),
-            result["state"],
+            xstate=result["xstate"],
         )
     model_corner_zks = ssh.wf_model(
         np.rad2deg(aos_corner_avg["thx_OCS"]),
         np.rad2deg(aos_corner_avg["thy_OCS"]),
-        result["state"],
+        xstate=result["xstate"],
     )
     if args.asdf is not None:
         tree = dict(
@@ -477,7 +477,7 @@ def main(args):
             at.write(f"ext e1   {(Ixx-Iyy)/(Ixx+Iyy):8.3f}")
             at.write(f"ext e2   {2*Ixy/(Ixx+Iyy):8.3f}")
             at.write()
-            for i, dof in enumerate(result["state"]):
+            for i, dof in enumerate(result["xstate"]):
                 name, unit = ALL_DOFS[use_dof[i]]
                 at.write(f"{name:8} {dof:8.3f} {unit}")
 

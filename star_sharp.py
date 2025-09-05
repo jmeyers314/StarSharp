@@ -47,7 +47,9 @@ WAVELENGTHS = dict(
     y=973.9e-9
 )
 
-
+FIELD_OUTER = 1.75
+PUPIL_OUTER = 4.18
+PUPIL_INNER = PUPIL_OUTER * 0.612
 SIGMA_TO_FWHM = np.sqrt(np.log(256))
 
 
@@ -56,7 +58,7 @@ def spot_size(
     wavelength: float,
     nrad: int = 5,
     naz: int = 30,
-    outer: float = 1.75
+    outer: float = FIELD_OUTER
 ) -> NDArray[np.float64]:
     """
     Estimate spot sizes for a given optic and wavelength.
@@ -100,8 +102,8 @@ def spot_size(
             theta_y=thy_,
             nrad=nrad * 3,  # 3x more pupil points than field
             naz=naz * 3,
-            outer=4.15,  # Avoid clipping the actual pupil
-            inner=2.6,
+            outer=PUPIL_OUTER*0.99,  # Avoid clipping the actual pupil
+            inner=PUPIL_INNER*1.01,
         )
         rays = optic.trace(rays)
         xs = rays.x
@@ -236,7 +238,7 @@ def get_dzs(
     jmax: int = 28,
     nrad: int = 7,
     naz: int = 45,
-    outer: float = 1.75,
+    outer: float = FIELD_OUTER,
     verbose=False,
 ) -> NDArray[np.float64]:
     """
@@ -408,13 +410,13 @@ class StarSharp:
 
         # For transverse model, we pre-select field and pupil evaluation points
         self.pupil_x, self.pupil_y = hexapolar(
-            outer=4.15,
-            inner=2.6,
+            outer=PUPIL_OUTER*0.99,  # Avoid clipping the actual pupil
+            inner=PUPIL_INNER*1.01,
             nrad=transverse_pupil_radii,
             naz=int(2 * np.pi * transverse_pupil_radii),
         )
         self.field_u, self.field_v = hexapolar(
-            outer=1.75,
+            outer=FIELD_OUTER,
             nrad=transverse_field_radii,
             naz=int(2 * np.pi * transverse_field_radii),
         )
@@ -434,7 +436,7 @@ class StarSharp:
     @property
     def dx(self) -> NDArray[np.float64]:
         """x-displacement sensitivity of ray indexed by
-        [degree-of-freedom, field, pupil] in meters per micron-or-arcsec.
+        [field, pupil, degree-of-freedom] in meters per micron-or-arcsec.
         """
         if self._dx is None:
             self._build_transverse_sensitivity()
@@ -444,7 +446,7 @@ class StarSharp:
     @property
     def dy(self) -> NDArray[np.float64]:
         """y-displacement sensitivity of ray indexed by
-        [degree-of-freedom, field, pupil] in meters per micron-or-arcsec.
+        [field, pupil, degree-of-freedom] in meters per micron-or-arcsec.
         """
         if self._dy is None:
             self._build_transverse_sensitivity()
@@ -472,7 +474,7 @@ class StarSharp:
     @property
     def A(self) -> NDArray[np.float64]:
         """Wavefront sensitivity matrix as double Zernike series.
-        Indexed as [degree-of-freedom, field, pupil] in meters per micron / arcsec.
+        Indexed as [field, pupil, degree-of-freedom] in meters per micron / arcsec.
         """
         if self._A is None:
             self._build_wf_sensitivity()
@@ -496,10 +498,10 @@ class StarSharp:
         """
         return [
             DoubleZernike(
-                self.A[i],
-                uv_outer=1.75,
-                xy_outer=4.18,
-                xy_inner=4.18 * 0.612,
+                self.A[..., i],
+                uv_outer=FIELD_OUTER,
+                xy_outer=PUPIL_OUTER,
+                xy_inner=PUPIL_INNER,
             )
             for i in range(self.n_dof)
         ]
@@ -510,9 +512,9 @@ class StarSharp:
         """
         return DoubleZernike(
             self.zk0,
-            uv_outer=1.75,
-            xy_outer=4.18,
-            xy_inner=4.18 * 0.612,
+            uv_outer=FIELD_OUTER,
+            xy_outer=PUPIL_OUTER,
+            xy_inner=PUPIL_INNER,
         )
 
     @property
@@ -559,8 +561,8 @@ class StarSharp:
                 self._y0 = af["y0"]
             return
 
-        self._dx = np.empty((self.n_dof, self.n_field, self.n_pupil))
-        self._dy = np.empty((self.n_dof, self.n_field, self.n_pupil))
+        self._dx = np.empty((self.n_field, self.n_pupil, self.n_dof))
+        self._dy = np.empty((self.n_field, self.n_pupil, self.n_dof))
         self._x0 = np.empty((self.n_field, self.n_pupil))
         self._y0 = np.empty((self.n_field, self.n_pupil))
         bar = None
@@ -596,15 +598,15 @@ class StarSharp:
                 crdx = pcr.x - fcr.x
                 crdy = pcr.y - fcr.y
 
-                self._dx[idof][ith] = (prays.x - frays.x - crdx) / step
-                self._dy[idof][ith] = (prays.y - frays.y - crdy) / step
-                self._dx[idof][ith][frays.vignetted] = np.nan
-                self._dy[idof][ith][frays.vignetted] = np.nan
+                self._dx[ith, :, idof] = (prays.x - frays.x - crdx) / step
+                self._dy[ith, :, idof] = (prays.y - frays.y - crdy) / step
+                self._dx[ith, frays.vignetted, idof] = np.nan
+                self._dy[ith, frays.vignetted, idof] = np.nan
                 if idof == 0:
                     self._x0[ith] = np.array(frays.x)
                     self._y0[ith] = np.array(frays.y)
-                    self._x0[ith][frays.vignetted] = np.nan
-                    self._y0[ith][frays.vignetted] = np.nan
+                    self._x0[ith, frays.vignetted] = np.nan
+                    self._y0[ith, frays.vignetted] = np.nan
                     self._x0[ith] -= np.nanmean(self._x0[ith])
                     self._y0[ith] -= np.nanmean(self._y0[ith])
             if bar is not None:
@@ -641,13 +643,13 @@ class StarSharp:
             kmax=self.wf_kmax,
             jmax=self.wf_jmax,
         )
-        self._A = np.empty((self.n_dof, self.wf_kmax + 1, self.wf_jmax + 1))
+        self._A = np.empty((self.wf_kmax + 1, self.wf_jmax + 1, self.n_dof))
         bar = None
         if self.tqdm is not None:
             bar = self.tqdm(total=self.n_dof, desc="Building wavefront sensitivity")
-        for idof, step in enumerate(self._steps):
+        for idof, (step, sign) in enumerate(zip(self._steps, self.dof_signs)):
             dof = np.zeros(self.n_dof, dtype=float)
-            dof[idof] = step
+            dof[idof] = step * sign
             perturbed = self.builder.with_aos_dof(dof).build()
             perturbed_dzs = get_dzs(
                 perturbed,
@@ -655,7 +657,7 @@ class StarSharp:
                 kmax=self.wf_kmax,
                 jmax=self.wf_jmax,
             )
-            self._A[idof] = (perturbed_dzs - self._zk0) / step
+            self._A[..., idof] = (perturbed_dzs - self._zk0) / step
             if bar is not None:
                 bar.update(1)
         # Save the wavefront sensitivity to disk
@@ -727,6 +729,8 @@ class StarSharp:
         )
         # Adjust M2 mode ranges to account for lbf to N conversion
         ranges[30:] /= 4.448222
+        # Adjust hexapod decenter weights.
+        # ranges[[1,2,6,7]] *= 20.0
         return ranges
 
     @cached_property
@@ -734,8 +738,12 @@ class StarSharp:
         """Relative ability of degree of freedom to affect second moments.
         """
         # Variance over the pupil, Mean over the field, one entry per dof.
-        return np.mean(
-            np.sqrt(np.nanvar(self.dx, axis=2) + np.nanvar(self.dy, axis=2)), axis=1
+        return np.median(
+        # return np.mean(
+            np.sqrt(
+                np.nanvar(self.dx, axis=1) + np.nanvar(self.dy, axis=1)
+            ),
+            axis=0
         )
 
     @cached_property
@@ -758,13 +766,13 @@ class StarSharp:
         v = np.repeat(self.field_v, self.n_pupil)
         x = np.tile(self.pupil_x, self.n_field)
         y = np.tile(self.pupil_y, self.n_field)
-        dx = self.dx.reshape(self.n_dof, -1)
-        dy = self.dy.reshape(self.n_dof, -1)
+        dx = self.dx.reshape(-1, self.n_dof)
+        dy = self.dy.reshape(-1, self.n_dof)
 
         # Filter out the NaNs
-        good = np.isfinite(dx[0]) & np.isfinite(dy[0])
-        dx = dx[:, good]
-        dy = dy[:, good]
+        good = np.isfinite(dx[..., 0]) & np.isfinite(dy[..., 0])
+        dx = dx[good]
+        dy = dy[good]
         u = u[good]
         v = v[good]
         x = x[good]
@@ -777,19 +785,19 @@ class StarSharp:
             v,
             x,
             y,
-            uv_outer=1.75,
-            xy_outer=4.18,
-            xy_inner=2.55,
+            uv_outer=FIELD_OUTER,
+            xy_outer=PUPIL_OUTER,
+            xy_inner=PUPIL_INNER,
         )
         dz_basis = dz_basis.reshape(-1, dz_basis.shape[-1])  # ravel the jk indices
-        tdz = np.empty((self.n_dof, 2, kmax + 1, jmax + 1))
-        xycoefs, *_ = np.linalg.lstsq(dz_basis.T, np.concatenate([dx, dy]).T, rcond=None)
-        tdz[:, 0] = xycoefs[:, :self.n_dof].T.reshape((self.n_dof, kmax + 1, jmax + 1))
-        tdz[:, 1] = xycoefs[:, self.n_dof:].T.reshape((self.n_dof, kmax + 1, jmax + 1))
+        tdz = np.empty((2, kmax + 1, jmax + 1, self.n_dof))
+        xycoefs, *_ = np.linalg.lstsq(dz_basis.T, np.hstack([dx, dy]), rcond=None)
+        tdz[0] = xycoefs[:, :self.n_dof].T.reshape((kmax + 1, jmax + 1, self.n_dof))
+        tdz[1] = xycoefs[:, self.n_dof:].T.reshape((kmax + 1, jmax + 1, self.n_dof))
         # k=0 and j=0 are unused
         # We also don't care about constant pupil terms
-        tdz[:, :, 0, :] = 0.0
-        tdz[:, :, :, :2] = 0.0
+        tdz[:, 0, :, :] = 0.0
+        tdz[:, :, :2, :] = 0.0
         with asdf.AsdfFile(
             {
                 "tdz":tdz,
@@ -799,32 +807,33 @@ class StarSharp:
         return tdz
 
     @cached_property
-    def _svd(self):
+    def _svd(self) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
         if self.ortho_transverse:
-            factor2 = self._transverse_double_zernikes
+            A = self._transverse_double_zernikes
         else:
-            factor2 = self.A
-        sh = (-1,) + tuple([1]*(factor2.ndim-1))
-        factor1 = (self._ranges * self._moments_power).reshape(sh)
-        A = factor1 * factor2
-        A = A[self.use_dof]
-        A = A.reshape(len(self.use_dof), -1)
+            A = self.A
+        A = A * self._ranges
+        A = A * self._moments_power
+        A = A[..., self.use_dof]
+        A = A.reshape(-1, A.shape[-1])
         U, S, Vh = np.linalg.svd(A, full_matrices=False)
         return U, S, Vh
 
     def orthogonal_to_nominal(
         self,
-        state,
-    ):
+        vstate,
+    ) -> NDArray[np.float64]:
         if self.nkeep is None:
-            return state
+            return vstate
+        assert len(vstate) == self.nkeep
         U, S, Vh = self._svd
-        assert len(state) == self.nkeep
-        return U[:, :self.nkeep] @ state
+        xstate = vstate @ Vh[:self.nkeep]
+        return xstate
 
     def moments_model(
         self,
-        state: FloatArray,
+        xstate: Optional[FloatArray] = None,
+        vstate: Optional[FloatArray] = None,
         dIxx: Optional[float] = 0.0,
         dIxy: Optional[float] = 0.0,
         dIyy: Optional[float] = 0.0,
@@ -835,7 +844,7 @@ class StarSharp:
 
         Parameters
         ----------
-        state : FloatArray
+        xstate : FloatArray
             The state of the degrees of freedom.
             Units are meters for translation/bending modes and arcsec for tilts.
         dIxx : float, optional
@@ -852,10 +861,14 @@ class StarSharp:
         dict[str, NDArray[np.float64]]
             A dictionary containing the second moments and related quantities.
         """
-        state = np.asarray(state)
-        assert len(state) == len(self.use_dof)
-        this_dx = np.sum(state[:, None, None] * self.dx[self.use_dof], axis=0)
-        this_dy = np.sum(state[:, None, None] * self.dy[self.use_dof], axis=0)
+        if vstate is not None:
+            if xstate is not None:
+                raise ValueError("Cannot provide both xstate and vstate.")
+            xstate = self.orthogonal_to_nominal(vstate)
+
+        assert len(xstate) == len(self.use_dof)
+        this_dx = self.dx[..., self.use_dof] @ xstate
+        this_dy = self.dy[..., self.use_dof] @ xstate
         if include_intrinsic:
             this_dx += self.x0
             this_dy += self.y0
@@ -913,16 +926,21 @@ class StarSharp:
         self,
         u: FloatArray,
         v: FloatArray,
-        state: FloatArray,
+        xstate: Optional[FloatArray] = None,
+        vstate: Optional[FloatArray] = None,
         include_intrinsic: bool = True,
     ) -> NDArray[np.float64]:
-        zk0 = self.zk0_dz.xycoef(u, v)
-        A = np.empty((len(self.use_dof), len(u), self.wf_jmax + 1))
+        if vstate is not None:
+            if xstate is not None:
+                raise ValueError("Cannot provide both xstate and vstate.")
+            xstate = self.orthogonal_to_nominal(vstate)
+        A = np.empty((len(u), self.wf_jmax + 1, len(self.use_dof)))
         for i, idof in enumerate(self.use_dof):
-            A[i] = self.A_dz[idof].xycoef(u, v)
+            A[..., i] = self.A_dz[idof].xycoef(u, v)
 
-        wf = np.einsum("i, ijk -> jk", state, A)
+        wf = A @ xstate
         if include_intrinsic:
+            zk0 = self.zk0_dz.xycoef(u, v)
             wf += zk0
 
         return wf
@@ -956,11 +974,12 @@ class StarSharp:
 
         if self.nkeep is not None:
             assert len(state) == self.nkeep
-            state = self.orthogonal_to_nominal(state)
+            xstate = self.orthogonal_to_nominal(state)
         else:
             assert len(state) == len(self.use_dof)
+            xstate = state
         test_mom = self.moments_model(
-            state, dIxx=dIxx, dIxy=dIxy, dIyy=dIyy
+            xstate=xstate, dIxx=dIxx, dIxy=dIxy, dIyy=dIyy
         )
 
         good = ~np.isnan(Ixx)
@@ -982,9 +1001,11 @@ class StarSharp:
         zk: NDArray[np.float64],
     ) -> NDArray[np.float64]:
         if self.nkeep is not None:
-            state = self.orthogonal_to_nominal(state)
+            xstate = self.orthogonal_to_nominal(state)
+        else:
+            xstate = state
         test_wf = self.wf_model(
-            u=u, v=v, state=state, include_intrinsic=False
+            u=u, v=v, xstate=xstate, include_intrinsic=False
         )
         return (test_wf[:, use_zk] - zk).ravel()
 
@@ -1010,7 +1031,7 @@ class StarSharp:
         **kwargs,
     ):
         U, S, Vh = self._svd
-        ax0.imshow(U, origin="lower", aspect="auto", **kwargs)
+        ax0.imshow(Vh.T, origin="lower", aspect="auto", **kwargs)
         # Show breaks between hexapods and mirrors
         m2_hex_idx = np.where(self.use_dof < 5)[0]
         cam_hex_idx = np.where((self.use_dof >= 5) & (self.use_dof < 10))[0]
@@ -1027,36 +1048,37 @@ class StarSharp:
                 ax0.axhline(m1m3_bend_idx[-1] + 0.5, color="k", alpha=0.2)
 
         nkeep = self.nkeep if self.nkeep is not None else len(S)
-        ax0.axvspan(nkeep - 0.5, len(S)-0.5, color="k", alpha=0.2)
+        ax0.axvspan(nkeep - 0.5, len(S) - 0.5, color="k", alpha=0.2)
 
-        ax1.plot(np.arange(1, len(S)+1), S)
+        ax1.plot(np.arange(1, len(S) + 1), S)
         ax1.set_xlim(0.5, len(S) + 0.5)
-        ax1.set_xticks([i for i in range(5, len(self.use_dof)+1, 5)])
-        ax1.set_xticklabels([f"{i}" for i in range(5, len(self.use_dof)+1, 5)])
+        ax1.set_xticks([i for i in range(5, len(self.use_dof) + 1, 5)])
+        ax1.set_xticklabels([f"{i}" for i in range(5, len(self.use_dof) + 1, 5)])
         ax1.set_yscale("log")
         ax1.set_yticks([])
-        ax1.axvspan(nkeep + 0.5, len(S)+0.5, color="k", alpha=0.2)
+        ax1.axvspan(nkeep + 0.5, len(S) + 0.5, color="k", alpha=0.2)
 
     def plot_sens_dz(
         self,
         ax: "Axes",
-        **kwargs
+        **kwargs,
     ):
         # Declare that interesting DZs to plot are
         dzs = [(k, j) for j in range(4, 8+1) for k in range(1, 3+1)]
         dzs.extend([(1, j) for j in range(9, 15+1)])
-        rot, S, Vh = self._svd
-        A = self.A[self.use_dof]
+        U, S, Vh = self._svd
+        A = self.A[..., self.use_dof]
         # sensitivity of each vmode
-        Achar = np.einsum("ab,ajk->bjk", rot, A)
-        # Normalize Achar
-        for i in range(Achar.shape[0]):
-            Achar[i] /= np.linalg.norm(Achar[i])
+        A_V = A @ Vh.T
+        # Normalize A_V for each mode
+        for i in range(A_V.shape[-1]):
+            A_V[..., i] /= np.linalg.norm(A_V[..., i])
         show = np.zeros((len(dzs), len(self.use_dof)))
         for i, (k, j) in enumerate(dzs):
-            Acol = Achar[:, k, j]
+            Acol = A_V[k, j]
             show[i, :] = Acol
-        ax.imshow(show, origin="lower", aspect="auto", **kwargs)
+        vmax = np.nanmax(np.abs(show))
+        ax.imshow(show, origin="lower", aspect="auto", vmin=-vmax, vmax=vmax, **kwargs)
         ax.set_yticks(list(range(len(dzs))))
         ax.set_yticklabels([f"({i},{j})" for i, j in dzs])
         ax.set_xticks([i-1 for i in range(5, len(self.use_dof)+1, 5)])
@@ -1078,10 +1100,16 @@ class StarSharp:
             **kwargs
         )
         assert len(result.x) == nguess + 3
-        dof = self.orthogonal_to_nominal(result.x[:-3])
+        if self.nkeep is not None:
+            vstate = result.x[:-3]
+            xstate = self.orthogonal_to_nominal(vstate)
+        else:
+            xstate = result.x[:-3]
+            vstate = None
         Ixx, Ixy, Iyy = result.x[-3:]
         result = dict(
-            state=dof,
+            xstate=xstate,
+            vstate=vstate,
             Ixx=float(Ixx),
             Ixy=float(Ixy),
             Iyy=float(Iyy),
@@ -1099,23 +1127,38 @@ class StarSharp:
             use_zk = list(range(4, self.wf_jmax + 1))
 
         zk0 = self.zk0_dz.xycoef(u, v)[:, use_zk]
-        A = np.empty((len(self.use_dof), len(u), len(use_zk)))
+        A = np.empty((len(u), len(use_zk), len(self.use_dof)))
         for i, idof in enumerate(self.use_dof):
-            A[i] = self.A_dz[idof].xycoef(u, v)[:, use_zk]
+            A[..., i] = self.A_dz[idof].xycoef(u, v)[:, use_zk]
 
         dzk = zk - zk0
 
-        A = A.reshape(A.shape[0], -1)
+        A = A.reshape(-1, A.shape[-1])
         dzk = dzk.reshape(-1)
 
         if self.nkeep is not None:
             U, S, Vh = self._svd
-            A = U[:, :self.nkeep].T @ A
 
-        state, *_ = np.linalg.lstsq(A.T, dzk, rcond=None)
-        state = self.orthogonal_to_nominal(state)
+            if False:
+                A_V = A @ Vh[:self.nkeep].T
+                vstate, *_ = np.linalg.lstsq(A_V, dzk, rcond=None)
+                xstate = self.orthogonal_to_nominal(vstate)
+            else:
+                # Let's try controlling truncation with rcond.
+                A = A * ((self._ranges * self._moments_power)[self.use_dof])
+                rcond = S[self.nkeep - 1] / S[0] - np.finfo(float).eps
+                xstate, *_ = np.linalg.lstsq(A, dzk, rcond=rcond)
+                xstate = xstate * ((self._ranges * self._moments_power)[self.use_dof])
+                vstate = None
+        else:
+            xstate, *_ = np.linalg.lstsq(A, dzk, rcond=None)
+            vstate = None
+
+
+
         result = dict(
-            state=state,
+            xstate=xstate,
+            vstate=vstate,
             Ixx=float("nan"),
             Ixy=float("nan"),
             Iyy=float("nan"),
@@ -1140,10 +1183,17 @@ class StarSharp:
             **kwargs
         )
         assert len(result.x) == nguess + 3
-        dof = self.orthogonal_to_nominal(result.x[:-3])
+
+        if self.nkeep is not None:
+            vstate = result.x[:-3]
+            xstate = self.orthogonal_to_nominal(vstate)
+        else:
+            xstate = result.x[:-3]
+            vstate = None
         Ixx, Ixy, Iyy = result.x[-3:]
         result = dict(
-            state=dof,
+            xstate=xstate,
+            vstate=vstate,
             Ixx=float(Ixx),
             Ixy=float(Ixy),
             Iyy=float(Iyy),
