@@ -375,6 +375,8 @@ class StarSharp:
         Maximum pupil index for sensitivity matrix and intrinsic Zernikes.
     ortho_transverse : bool, optional
         Use transverse sensitivity to orthogonalize.
+    builder_kwargs : dict, optional
+        Additional keyword arguments to pass to LSSTBuilder.
     tqdm : callable, optional
         Optional progressbar callable.
     """
@@ -388,13 +390,14 @@ class StarSharp:
         wf_kmax: int = 15,
         wf_jmax: int = 28,
         ortho_transverse: bool = False,
-        tqdm: Optional[Callable] = None,
+        builder_kwargs: Optional[dict] = None,
+        tqdm: Optional[Callable[..., None]] = None,
     ) -> None:
         # Use builder instead of fiducial so don't need to pass in
         # the fea_dir and bend_dir.
         self.band = band
         self.fiducial = batoid.Optic.fromYaml(f"LSST_{band}.yaml")
-        self.builder = LSSTBuilder(self.fiducial)
+        self.builder = LSSTBuilder(self.fiducial, **(builder_kwargs or {}))
         self.wavelength = WAVELENGTHS[band]
         if isinstance(use_dof, str):
             dof_str = use_dof.replace(" ", "").strip()
