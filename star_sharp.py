@@ -594,22 +594,26 @@ class StarSharp:
                 frays = self.fiducial.trace(rays.copy())
                 prays = perturbed.trace(rays)
 
-                # Subtract the motion of the chief ray.
-                cr = batoid.RayVector.fromStop(
-                    np.array([0]),
-                    np.array([0]),
-                    theta_x=np.deg2rad(u),
-                    theta_y=np.deg2rad(v),
-                    optic=self.fiducial,
-                    wavelength=self.wavelength,
-                )
-                fcr = self.fiducial.trace(cr.copy())
-                pcr = perturbed.trace(cr)
-                crdx = pcr.x - fcr.x
-                crdy = pcr.y - fcr.y
+                # Subtract the mean motion
+                dx = np.nanmean(prays.x - frays.x)
+                dy = np.nanmean(prays.y - frays.y)
 
-                self._dx[ith, :, idof] = (prays.x - frays.x - crdx) / step
-                self._dy[ith, :, idof] = (prays.y - frays.y - crdy) / step
+                # # Subtract the motion of the chief ray.
+                # cr = batoid.RayVector.fromStop(
+                #     np.array([0]),
+                #     np.array([0]),
+                #     theta_x=np.deg2rad(u),
+                #     theta_y=np.deg2rad(v),
+                #     optic=self.fiducial,
+                #     wavelength=self.wavelength,
+                # )
+                # fcr = self.fiducial.trace(cr.copy())
+                # pcr = perturbed.trace(cr)
+                # dx = pcr.x - fcr.x
+                # dy = pcr.y - fcr.y
+
+                self._dx[ith, :, idof] = (prays.x - frays.x - dx) / step
+                self._dy[ith, :, idof] = (prays.y - frays.y - dy) / step
                 self._dx[ith, frays.vignetted, idof] = np.nan
                 self._dy[ith, frays.vignetted, idof] = np.nan
                 if idof == 0:
