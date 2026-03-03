@@ -856,7 +856,7 @@ class StarSharp:
         ----------
         xstate : FloatArray
             The state of the degrees of freedom.
-            Units are meters for translation/bending modes and arcsec for tilts.
+            Units are microns for translation/bending modes and arcsec for tilts.
         dIxx : float, optional
             Additional variance in Ixx to add.
         dIxy : float, optional
