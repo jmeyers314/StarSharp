@@ -466,7 +466,7 @@ def main(args):
             at.write(f"ext e2   {2*Ixy/(Ixx+Iyy):8.3f}")
             at.write()
             for i, dof in enumerate(result["xstate"]):
-                name, unit = ALL_DOFS[use_dof[i]]
+                name, unit = ALL_DOFS[ssh.use_dof[i]]
                 at.write(f"{name:8} {dof:8.3f} {unit}")
 
         # vmode panel

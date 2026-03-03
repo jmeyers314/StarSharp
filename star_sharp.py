@@ -52,6 +52,13 @@ PUPIL_OUTER = 4.18
 PUPIL_INNER = PUPIL_OUTER * 0.612
 SIGMA_TO_FWHM = np.sqrt(np.log(256))
 
+DOF_NAMES = []
+for component in "M2", "Cam":
+    for dof in "dz", "dx", "dy", "rx", "ry":
+        DOF_NAMES.append(f"{component} {dof}")
+for component in "M1M3", "M2":
+    for i in range(1, 21):
+        DOF_NAMES.append(f"{component} B{i}")
 
 def spot_size(
     optic: batoid.Optic,
