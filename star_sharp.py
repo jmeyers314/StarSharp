@@ -423,7 +423,7 @@ class StarSharp:
             outer=PUPIL_OUTER*0.99,  # Avoid clipping the actual pupil
             inner=PUPIL_INNER*1.01,
             nrad=transverse_pupil_radii,
-            naz=int(2 * np.pi * transverse_pupil_radii),
+            naz=int(2 * np.pi * PUPIL_OUTER / (PUPIL_OUTER - PUPIL_INNER) * transverse_pupil_radii),
         )
         self.field_u, self.field_v = hexapolar(
             outer=FIELD_OUTER,
