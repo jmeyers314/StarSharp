@@ -381,7 +381,7 @@ class StarSharp:
     def __init__(
         self,
         band: str,
-        use_dof: Optional[IntegerArray] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        use_dof: Optional[IntegerArray | str] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
         nkeep: Optional[int] = 6,
         transverse_pupil_radii: int = 10,
         transverse_field_radii: int = 14,
@@ -396,6 +396,16 @@ class StarSharp:
         self.fiducial = batoid.Optic.fromYaml(f"LSST_{band}.yaml")
         self.builder = LSSTBuilder(self.fiducial)
         self.wavelength = WAVELENGTHS[band]
+        if isinstance(use_dof, str):
+            dof_str = use_dof.replace(" ", "").strip()
+            use_dof = []
+            for part in dof_str.split(","):
+                if "-" in part:
+                    start, end = [int(p) for p in part.split("-")]
+                    use_dof.extend(range(start, end + 1))
+                else:
+                    use_dof.append(int(part))
+            use_dof = np.sort(use_dof)
         self.use_dof = np.array(use_dof, dtype=int)
         self.nkeep = nkeep
         self.transverse_pupil_radii = transverse_pupil_radii

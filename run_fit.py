@@ -95,18 +95,6 @@ def main(args):
     if len(src) == 0:
         raise ValueError("No source measurements found in the input file.")
 
-    # Parse the use_dof argument
-    # which will in general be something like: "3-6,9,10,20-24"
-    # first strip whitespace
-    dof_str = args.use_dof.strip()
-    use_dof = []
-    for part in dof_str.split(","):
-        if "-" in part:
-            start, end = [int(p) for p in part.split("-")]
-            use_dof.extend(range(start, end + 1))
-        else:
-            use_dof.append(int(part))
-    use_dof = np.sort(use_dof)
     nkeep = args.nkeep
     if nkeep < 0:
         nkeep = None
@@ -126,7 +114,7 @@ def main(args):
 
     ssh = StarSharp(
         band = "r",
-        use_dof = use_dof,
+        use_dof = args.use_dof,
         nkeep = nkeep,
         transverse_pupil_radii = args.transverse_pupil_radii,
         transverse_field_radii = args.transverse_field_radii,
