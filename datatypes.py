@@ -614,6 +614,16 @@ class StateFactory:
         use_dof: NDArray[np.integer],
         nkeep: int | None = None,
     ):
+        if isinstance(use_dof, str):
+            dof_str = use_dof.replace(" ", "").strip()
+            use_dof = []
+            for part in dof_str.split(","):
+                if "-" in part:
+                    start, end = [int(p) for p in part.split("-")]
+                    use_dof.extend(range(start, end + 1))
+                else:
+                    use_dof.append(int(part))
+            use_dof = np.sort(use_dof)
         self.A = np.asarray(A, dtype=float)
         self.use_dof = np.asarray(use_dof, dtype=int)
         self.n_dof = self.A.shape[-1]
