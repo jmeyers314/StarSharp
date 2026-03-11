@@ -78,7 +78,7 @@ class FieldCoords:
                 theta_x=th_u, theta_y=th_v,
                 projection="gnomonic",
                 optic=rotated,
-                wavelength=622e-9,
+                wavelength=622e-9,  # ! Ack
             )
             rotated.trace(rays)
             wcs = galsim.FittedSIPWCS(rays.x*1000, rays.y*1000, th_u, th_v, order=3)  # Use mm <-> radians
