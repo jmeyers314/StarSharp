@@ -8,7 +8,7 @@ from astropy.coordinates import Angle
 
 import galsim
 
-from datatypes import FieldCoords, Spots, Zernikes
+from datatypes import FieldCoords, Spots, Zernikes, State, StateFactory
 
 
 # ---------------------------------------------------------------------------
@@ -448,3 +448,218 @@ class TestZernikesToGalsim:
         gz_nm = zk.to_galsim(unit=u.nm)
         gz_um = zk.to_galsim(unit=u.um)
         np.testing.assert_allclose(gz_nm.coef, gz_um.coef * 1000, atol=1e-10)
+
+
+# ===================================================================
+# State
+# ===================================================================
+
+def _make_Vh(n_active, rng=None):
+    """Build an orthogonal Vh matrix of shape (n_active, n_active)."""
+    if rng is None:
+        rng = np.random.default_rng(99)
+    A = rng.standard_normal((n_active * 3, n_active))
+    _, _, Vh = np.linalg.svd(A, full_matrices=False)
+    return Vh
+
+
+class TestStateConstruction:
+    def test_from_x(self):
+        use_dof = np.array([0, 2, 5])
+        s = State(state=np.array([1.0, 2.0, 3.0]), basis="x", use_dof=use_dof, n_dof=10)
+        assert s.basis == "x"
+        assert len(s.state) == 3
+
+    def test_from_f(self):
+        fvals = np.zeros(10)
+        fvals[2] = 5.0
+        s = State(state=fvals, basis="f")
+        assert s.basis == "f"
+        assert s.n_dof == 10  # inferred
+
+    def test_from_v(self):
+        Vh = _make_Vh(5)
+        s = State(state=np.ones(3), basis="v", Vh=Vh, nkeep=3,
+                  use_dof=np.arange(5), n_dof=10)
+        assert s.basis == "v"
+        assert s.nkeep == 3
+
+    def test_nkeep_inferred_from_Vh(self):
+        Vh = _make_Vh(5)
+        s = State(state=np.ones(5), basis="x", use_dof=np.arange(5),
+                  n_dof=10, Vh=Vh)
+        assert s.nkeep == 5  # inferred from Vh.shape[0]
+
+    def test_invalid_basis(self):
+        with pytest.raises(ValueError, match="basis must be"):
+            State(state=np.ones(3), basis="z")
+
+    def test_frozen(self):
+        s = State(state=np.ones(3), basis="x", use_dof=np.arange(3), n_dof=5)
+        with pytest.raises(AttributeError):
+            s.state = np.zeros(3)
+
+    def test_state_coerced_to_ndarray(self):
+        s = State(state=[1.0, 2.0], basis="x", use_dof=np.arange(2), n_dof=5)
+        assert isinstance(s.state, np.ndarray)
+
+
+class TestStateConversions:
+    def test_x_identity(self):
+        s = State(state=np.array([1.0, 2.0, 3.0]), basis="x",
+                  use_dof=np.array([0, 2, 5]), n_dof=10)
+        assert s.x is s
+
+    def test_f_identity(self):
+        s = State(state=np.zeros(10), basis="f")
+        assert s.f is s
+
+    def test_v_identity(self):
+        Vh = _make_Vh(5)
+        s = State(state=np.ones(3), basis="v", Vh=Vh, nkeep=3,
+                  use_dof=np.arange(5), n_dof=10)
+        assert s.v is s
+
+    def test_x_to_f_roundtrip(self):
+        use_dof = np.array([1, 3, 7])
+        xvals = np.array([10.0, 20.0, 30.0])
+        s = State(state=xvals, basis="x", use_dof=use_dof, n_dof=10)
+        fs = s.f
+        assert fs.basis == "f"
+        assert len(fs.state) == 10
+        np.testing.assert_allclose(fs.state[use_dof], xvals)
+        # Inactive DOFs are zero
+        inactive = np.setdiff1d(np.arange(10), use_dof)
+        np.testing.assert_allclose(fs.state[inactive], 0.0)
+        # Back to x
+        np.testing.assert_allclose(fs.x.state, xvals)
+
+    def test_f_to_x(self):
+        use_dof = np.array([0, 4])
+        fvals = np.array([5.0, 0.0, 0.0, 0.0, 9.0])
+        s = State(state=fvals, basis="f", use_dof=use_dof)
+        np.testing.assert_allclose(s.x.state, [5.0, 9.0])
+
+    def test_x_to_v_roundtrip_full_rank(self):
+        """When nkeep == len(use_dof), x->v->x is lossless."""
+        n_active = 5
+        Vh = _make_Vh(n_active)
+        xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        s = State(state=xvals, basis="x", use_dof=np.arange(n_active),
+                  n_dof=10, Vh=Vh, nkeep=n_active)
+        np.testing.assert_allclose(s.v.x.state, xvals, atol=1e-12)
+
+    def test_x_to_v_lossy_truncated(self):
+        """When nkeep < len(use_dof), x->v->x is lossy."""
+        n_active = 5
+        nkeep = 3
+        Vh = _make_Vh(n_active)
+        xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        s = State(state=xvals, basis="x", use_dof=np.arange(n_active),
+                  n_dof=10, Vh=Vh, nkeep=nkeep)
+        recovered = s.v.x.state
+        # Not exactly equal (lossy)
+        assert not np.allclose(recovered, xvals)
+        # But v->x->v is lossless
+        np.testing.assert_allclose(s.v.x.v.state, s.v.state, atol=1e-12)
+
+    def test_v_to_f(self):
+        n_active = 4
+        use_dof = np.array([1, 3, 5, 7])
+        Vh = _make_Vh(n_active)
+        vvals = np.ones(3)
+        s = State(state=vvals, basis="v", use_dof=use_dof, n_dof=10,
+                  Vh=Vh, nkeep=3)
+        fs = s.f
+        assert fs.basis == "f"
+        assert len(fs.state) == 10
+        # Inactive DOFs should be zero
+        inactive = np.setdiff1d(np.arange(10), use_dof)
+        np.testing.assert_allclose(fs.state[inactive], 0.0)
+
+    def test_f_to_v(self):
+        n_active = 4
+        use_dof = np.array([1, 3, 5, 7])
+        Vh = _make_Vh(n_active)
+        fvals = np.zeros(10)
+        fvals[use_dof] = [1.0, 2.0, 3.0, 4.0]
+        s = State(state=fvals, basis="f", use_dof=use_dof, Vh=Vh, nkeep=4)
+        vs = s.v
+        assert vs.basis == "v"
+        assert len(vs.state) == 4
+        # Back through x should recover the original x-values
+        np.testing.assert_allclose(vs.x.state, [1.0, 2.0, 3.0, 4.0], atol=1e-12)
+
+
+class TestStateRequires:
+    def test_f_to_x_requires_use_dof(self):
+        s = State(state=np.zeros(10), basis="f")
+        with pytest.raises(ValueError, match="use_dof"):
+            s.x
+
+    def test_x_to_f_requires_n_dof(self):
+        s = State(state=np.ones(3), basis="x", use_dof=np.arange(3))
+        with pytest.raises(ValueError, match="n_dof"):
+            s.f
+
+    def test_x_to_v_requires_Vh(self):
+        s = State(state=np.ones(3), basis="x", use_dof=np.arange(3), n_dof=5)
+        with pytest.raises(ValueError, match="Vh"):
+            s.v
+
+    def test_v_requires_Vh_at_construction(self):
+        with pytest.raises(ValueError, match="Vh"):
+            State(state=np.ones(3), basis="v", use_dof=np.arange(5), n_dof=10)
+
+
+class TestStateFactory:
+    def test_svd_computed(self):
+        rng = np.random.default_rng(42)
+        A = rng.standard_normal((30, 10))
+        use_dof = np.array([0, 2, 4, 6, 8])
+        sf = StateFactory(A=A, use_dof=use_dof, nkeep=3)
+        assert sf.n_dof == 10
+        assert sf.Vh.shape == (5, 5)
+        assert len(sf.S) == 5
+        assert sf.nkeep == 3
+
+    def test_nkeep_defaults_to_full(self):
+        rng = np.random.default_rng(42)
+        A = rng.standard_normal((30, 10))
+        use_dof = np.arange(5)
+        sf = StateFactory(A=A, use_dof=use_dof)
+        assert sf.nkeep == 5
+
+    def test_from_x(self):
+        rng = np.random.default_rng(42)
+        A = rng.standard_normal((30, 10))
+        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=3)
+        s = sf.from_x(np.ones(5))
+        assert s.basis == "x"
+        assert s.n_dof == 10
+        assert s.nkeep == 3
+
+    def test_from_f(self):
+        rng = np.random.default_rng(42)
+        A = rng.standard_normal((30, 10))
+        sf = StateFactory(A=A, use_dof=np.arange(5))
+        s = sf.from_f(np.zeros(10))
+        assert s.basis == "f"
+
+    def test_from_v(self):
+        rng = np.random.default_rng(42)
+        A = rng.standard_normal((30, 10))
+        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=3)
+        s = sf.from_v(np.ones(3))
+        assert s.basis == "v"
+
+    def test_factory_roundtrip(self):
+        """Factory-created states carry full context for all conversions."""
+        rng = np.random.default_rng(42)
+        A = rng.standard_normal((30, 10))
+        use_dof = np.array([0, 2, 4, 6, 8])
+        sf = StateFactory(A=A, use_dof=use_dof, nkeep=5)
+        xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        s = sf.from_x(xvals)
+        # Full chain: x -> f -> x -> v -> x
+        np.testing.assert_allclose(s.f.x.v.x.state, xvals, atol=1e-12)
