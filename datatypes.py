@@ -177,15 +177,15 @@ class FieldCoords:
     def detnum(self) -> int | NDArray[np.integer]:
         """Detector number(s). Returns -1 for points off any detector."""
         camera = self._require("camera")
-        fp = self.focal_plane
+        fp = self.focal_plane.ccs
         x = np.atleast_1d(fp.x.to_value(u.mm))
         y = np.atleast_1d(fp.y.to_value(u.mm))
 
         result = np.full(x.shape, -1, dtype=int)
         for det in camera:
             corners = det.getCorners(FOCAL_PLANE)
-            xs = [c[0] for c in corners]
-            ys = [c[1] for c in corners]
+            xs = [c[1] for c in corners]  # Transpose DVCS -> EDCS = CCS
+            ys = [c[0] for c in corners]
             mask = (x >= min(xs)) & (x <= max(xs)) & (y >= min(ys)) & (y <= max(ys))
             result[mask] = det.getId()
 
