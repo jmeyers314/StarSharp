@@ -336,8 +336,9 @@ class Zernikes:
 
     coefs: Quantity
     field: FieldCoords
-    R_outer: float = 1.0
-    R_inner: float = 0.0
+    R_outer: Quantity = None
+    R_inner: Quantity = None
+    wavelength: Quantity | None = None
     jmax: int | None = None
     frame: str = "ocs"
     rtp: Optional[Angle] = None
@@ -361,9 +362,7 @@ class Zernikes:
     @property
     def eps(self) -> float:
         """Obscuration ratio R_inner / R_outer."""
-        if self.R_outer == 0:
-            return 0.0
-        return self.R_inner / self.R_outer
+        return (self.R_inner / self.R_outer).value
 
     def __len__(self) -> int:
         if self.coefs.ndim == 1:
@@ -376,6 +375,7 @@ class Zernikes:
             field=self.field[idx],
             R_outer=self.R_outer,
             R_inner=self.R_inner,
+            wavelength=self.wavelength,
             jmax=self.jmax,
             frame=self.frame,
             rtp=self.rtp,
@@ -399,6 +399,7 @@ class Zernikes:
             field=self.field,
             R_outer=self.R_outer,
             R_inner=self.R_inner,
+            wavelength=self.wavelength,
             jmax=self.jmax,
             frame=frame,
             rtp=self.rtp,
@@ -424,6 +425,7 @@ class Zernikes:
         self,
         idx: int | None = None,
         unit: u.Unit = u.um,
+        radius_unit: u.Unit = u.m,
     ) -> galsim.zernike.Zernike:
         """Return a `galsim.zernike.Zernike` for one set of coefficients.
 
@@ -441,8 +443,8 @@ class Zernikes:
             raise TypeError("to_galsim() requires a single coefficient vector")
         return galsim.zernike.Zernike(
             c.to(unit).value,
-            R_outer=self.R_outer,
-            R_inner=self.R_inner,
+            R_outer=self.R_outer.to_value(radius_unit),
+            R_inner=self.R_inner.to_value(radius_unit),
         )
 
 
