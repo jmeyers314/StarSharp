@@ -1,0 +1,542 @@
+from __future__ import annotations
+
+import batoid
+from dataclasses import KW_ONLY, dataclass
+from typing import Optional
+
+import astropy.units as u
+import galsim
+import numpy as np
+from astropy.coordinates import Angle
+from astropy.units import Quantity
+from galsim.fitswcs import GSFitsWCS
+from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
+from numpy.typing import NDArray
+
+VALID_FRAMES = ("ocs", "ccs")
+
+
+@dataclass(frozen=True)
+class FieldCoords:
+    """Field coordinates in any supported frame and space.
+
+    Parameters
+    ----------
+    x, y : Quantity
+        Coordinate values with units.  Angular units (e.g. ``u.deg``,
+        ``u.arcsec``) indicate field-angle space; length units
+        (e.g. ``u.mm``) indicate focal-plane space.
+    frame : str
+        Coordinate frame: ``'ocs'`` (optical, default) or ``'ccs'``
+        (camera).
+    rtp : Angle or None
+        Rotation angle from OCS to CCS frame.  Required for frame conversions.
+    wcs : GSFitsWCS or None
+        WCS for converting between field-angle and focal-plane space.  Required for
+        space conversions.  WCS assumes field angles are in radians and focal-plane
+        coordinates are in mm.
+    telescope : batoid.Optic or None
+        Telescope model for creating WCS.
+    camera : Camera or None
+        Camera geometry for determining detector numbers.  Required for
+        ``detnum`` property.
+    """
+
+    x: Quantity
+    y: Quantity
+    frame: str = "ocs"
+    rtp: Optional[Angle] = None
+    wcs: Optional[GSFitsWCS] = None
+    telescope: Optional[batoid.Optic] = None
+    camera: Optional[Camera] = None
+
+    def __post_init__(self):
+        if not isinstance(self.x, Quantity) or not isinstance(self.y, Quantity):
+            raise TypeError("x and y must be astropy Quantity instances with units")
+        object.__setattr__(self, "x", np.atleast_1d(self.x))
+        object.__setattr__(self, "y", np.atleast_1d(self.y))
+        if self.frame not in VALID_FRAMES:
+            raise ValueError(f"frame must be one of {VALID_FRAMES}, got {self.frame!r}")
+        if not (self.x.unit.physical_type == self.y.unit.physical_type):
+            raise ValueError(
+                f"x and y must have compatible units, "
+                f"got {self.x.unit} and {self.y.unit}"
+            )
+        if self.x.unit.physical_type not in ("angle", "length"):
+            raise ValueError(
+                f"units must be angular or length, "
+                f"got physical type {self.x.unit.physical_type!r}"
+            )
+        if self.telescope is not None:
+            if self.wcs is not None:
+                raise ValueError("Cannot specify both telescope and wcs")
+            rtp = self._require("rtp")
+            rotated = self.telescope.withLocallyRotatedOptic("LSSTCamera", batoid.RotZ(rtp.rad))
+            nrad = 20
+            th_u, th_v = batoid.utils.hexapolar(np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad))
+            rays = batoid.RayVector.fromFieldAngles(
+                theta_x=th_u, theta_y=th_v,
+                projection="gnomonic",
+                optic=rotated,
+                wavelength=622e-9,
+            )
+            rotated.trace(rays)
+            wcs = galsim.FittedSIPWCS(rays.x*1000, rays.y*1000, th_u, th_v, order=3)  # Use mm <-> radians
+            object.__setattr__(self, "wcs", wcs)
+
+    def _require(self, name: str):
+        """Return the instance attribute or raise if not set."""
+        val = getattr(self, name)
+        if val is None:
+            raise ValueError(
+                f"{name} must be set on the FieldCoords to use this property"
+            )
+        return val
+
+    @property
+    def space(self) -> str:
+        """Inferred coordinate space: ``'angle'`` or ``'focal_plane'``."""
+        if self.x.unit.physical_type == "angle":
+            return "angle"
+        return "focal_plane"
+
+    def _rot(self, angle: Angle, frame: str) -> FieldCoords:
+        """Return a new FieldCoords with x/y rotated by *angle*."""
+        rx = self.x * np.cos(angle) + self.y * np.sin(angle)
+        ry = -self.x * np.sin(angle) + self.y * np.cos(angle)
+        return FieldCoords(
+            x=rx,
+            y=ry,
+            frame=frame,
+            rtp=self.rtp,
+            wcs=self.wcs,
+            camera=self.camera,
+        )
+
+    @property
+    def ocs(self) -> FieldCoords:
+        """This coordinate in the OCS frame."""
+        if self.frame == "ocs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(-rtp, "ocs")
+
+    @property
+    def ccs(self) -> FieldCoords:
+        """This coordinate in the CCS frame."""
+        if self.frame == "ccs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(rtp, "ccs")
+
+    @property
+    def focal_plane(self) -> FieldCoords:
+        """This coordinate in focal-plane space (CCS frame)."""
+        if self.space == "focal_plane":
+            return self
+        wcs = self._require("wcs")
+        field = self.ocs
+        fx, fy = wcs.toImage(
+            field.x.to_value(u.radian),
+            field.y.to_value(u.radian),
+            units="radians",
+        )
+        fp_ccs = FieldCoords(
+            x=fx << u.mm,
+            y=fy << u.mm,
+            frame="ccs",
+            rtp=self.rtp,
+            wcs=self.wcs,
+            camera=self.camera,
+        )
+        return getattr(fp_ccs, self.frame)
+
+    @property
+    def angle(self) -> FieldCoords:
+        """This coordinate in field-angle space (OCS frame)."""
+        if self.space == "angle":
+            return self
+        wcs = self._require("wcs")
+        fp = self.focal_plane
+        fx, fy = wcs.toWorld(
+            fp.x.to_value(u.mm),
+            fp.y.to_value(u.mm),
+            units="radians",
+        )
+        field_ocs = FieldCoords(
+            x=fx << u.radian,
+            y=fy << u.radian,
+            frame="ocs",
+            rtp=self.rtp,
+            wcs=self.wcs,
+            camera=self.camera,
+        )
+        return getattr(field_ocs, self.frame)
+
+    @property
+    def detnum(self) -> int | NDArray[np.integer]:
+        """Detector number(s). Returns -1 for points off any detector."""
+        camera = self._require("camera")
+        fp = self.focal_plane
+        x = np.atleast_1d(fp.x.to_value(u.mm))
+        y = np.atleast_1d(fp.y.to_value(u.mm))
+
+        result = np.full(x.shape, -1, dtype=int)
+        for det in camera:
+            corners = det.getCorners(FOCAL_PLANE)
+            xs = [c[0] for c in corners]
+            ys = [c[1] for c in corners]
+            mask = (x >= min(xs)) & (x <= max(xs)) & (y >= min(ys)) & (y <= max(ys))
+            result[mask] = det.getId()
+
+        if np.isscalar(fp.x.value):
+            return result.item()
+        return result
+
+    def __len__(self) -> int:
+        if self.x.ndim == 1:
+            return 1
+        return self.x.shape[0]
+
+    def __getitem__(self, idx: int | slice) -> FieldCoords:
+        return FieldCoords(
+            x=self.x[idx],
+            y=self.y[idx],
+            frame=self.frame,
+            rtp=self.rtp,
+            wcs=self.wcs,
+            camera=self.camera,
+        )
+
+
+@dataclass(frozen=True)
+class Spots:
+    """Spot diagrams: ray intersection positions on the focal plane.
+
+    May represent one or many field points.  When batched,
+    ``dx`` and ``dy`` have shape ``(n_field, n_ray)``.
+
+    Parameters
+    ----------
+    dx, dy : Quantity
+        Ray positions relative to the centroid.
+    vignetted : NDArray[bool]
+        Vignetting mask.
+    field : FieldCoords
+        Field coordinate(s) at which the spot was computed.
+    wavelength : Quantity or None
+        Wavelength of the traced rays.
+    frame : str
+        Coordinate frame: ``'ocs'`` (optical, default) or ``'ccs'``
+        (camera).
+    rtp : Angle or None
+        Rotation angle from OCS to CCS frame.  Required for frame conversions.
+    """
+
+    dx: Quantity
+    dy: Quantity
+    vignetted: NDArray[np.bool_]
+    field: FieldCoords
+    wavelength: Quantity | None = None
+    frame: str = "ccs"
+    rtp: Optional[Angle] = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dx", np.atleast_1d(self.dx))
+        object.__setattr__(self, "dy", np.atleast_1d(self.dy))
+        object.__setattr__(self, "vignetted", np.atleast_1d(self.vignetted))
+        if (
+            self.rtp is not None
+            and self.field.rtp is not None
+            and not np.allclose(
+                self.rtp.rad, self.field.rtp.rad  # type: ignore[union-attr]
+            )
+        ):
+            raise ValueError(
+                f"Spots.rtp ({self.rtp}) is inconsistent with "
+                f"field.rtp ({self.field.rtp})"
+            )
+
+    def __len__(self) -> int:
+        if self.dx.ndim == 1:
+            return 1
+        return self.dx.shape[0]
+
+    def __getitem__(self, idx: int | slice) -> Spots:
+        return Spots(
+            dx=self.dx[idx],
+            dy=self.dy[idx],
+            field=self.field[idx],
+            vignetted=self.vignetted[idx],
+            wavelength=self.wavelength,
+            frame=self.frame,
+            rtp=self.rtp,
+        )
+
+    def _require(self, name: str):
+        """Return the instance attribute or raise if not set."""
+        val = getattr(self, name)
+        if val is None:
+            raise ValueError(
+                f"{name} must be set on the Spots to use this property"
+            )
+        return val
+
+    def _rot(self, angle: Angle, frame: str) -> Spots:
+        """Return a new Spots with dx/dy rotated by *angle*."""
+        rdx = self.dx * np.cos(angle) + self.dy * np.sin(angle)
+        rdy = -self.dx * np.sin(angle) + self.dy * np.cos(angle)
+        return Spots(
+            dx=rdx,
+            dy=rdy,
+            vignetted=self.vignetted,
+            field=self.field,
+            wavelength=self.wavelength,
+            frame=frame,
+            rtp=self.rtp,
+        )
+
+    @property
+    def ocs(self) -> Spots:
+        """This spot in the OCS frame."""
+        if self.frame == "ocs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(-rtp, "ocs")
+
+    @property
+    def ccs(self) -> Spots:
+        """This spot in the CCS frame."""
+        if self.frame == "ccs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(rtp, "ccs")
+
+
+@dataclass(frozen=True)
+class Zernikes:
+    """Zernike coefficients at one or many field points.
+
+    When batched, ``coefs`` has shape ``(..., jmax + 1)``.
+
+    Parameters
+    ----------
+    coefs : Quantity
+        Zernike coefficient array.  The last axis indexes Noll
+        index *j* (0 … jmax).  Leading axes are batch dimensions.
+    R_outer : float
+        Outer radius of the annular pupil.
+    R_inner : float
+        Inner radius of the annular pupil.
+    jmax : int or None
+        Maximum Noll index.  Inferred from ``coefs`` if *None*.
+    rtp : Angle or None
+        Rotation angle from OCS to CCS frame.  Required for frame conversions.
+    """
+
+    coefs: Quantity
+    field: FieldCoords
+    R_outer: float = 1.0
+    R_inner: float = 0.0
+    jmax: int | None = None
+    frame: str = "ocs"
+    rtp: Optional[Angle] = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "coefs", np.atleast_1d(self.coefs))
+        if self.jmax is None:
+            object.__setattr__(self, "jmax", self.coefs.shape[-1] - 1)
+        if (
+            self.rtp is not None
+            and self.field.rtp is not None
+            and not np.allclose(
+                self.rtp.rad, self.field.rtp.rad  # type: ignore[union-attr]
+            )
+        ):
+            raise ValueError(
+                f"Zernikes.rtp ({self.rtp}) is inconsistent with "
+                f"field.rtp ({self.field.rtp})"
+            )
+
+    @property
+    def eps(self) -> float:
+        """Obscuration ratio R_inner / R_outer."""
+        if self.R_outer == 0:
+            return 0.0
+        return self.R_inner / self.R_outer
+
+    def __len__(self) -> int:
+        if self.coefs.ndim == 1:
+            return 1
+        return self.coefs.shape[0]
+
+    def __getitem__(self, idx: int | slice) -> Zernikes:
+        return Zernikes(
+            coefs=self.coefs[idx],
+            field=self.field[idx],
+            R_outer=self.R_outer,
+            R_inner=self.R_inner,
+            jmax=self.jmax,
+            frame=self.frame,
+            rtp=self.rtp,
+        )
+
+    def _require(self, name: str):
+        """Return the instance attribute or raise if not set."""
+        val = getattr(self, name)
+        if val is None:
+            raise ValueError(
+                f"{name} must be set on the Zernikes to use this property"
+            )
+        return val
+
+    def _rot(self, angle: Angle, frame:str) -> Zernikes:
+        """Return a new Zernikes with the coefficients rotated by *angle*."""
+        rot = galsim.zernike.zernikeRotMatrix(self.jmax, angle.radian)
+        coefs_rot = self.coefs @ rot
+        return Zernikes(
+            coefs=coefs_rot,
+            field=self.field,
+            R_outer=self.R_outer,
+            R_inner=self.R_inner,
+            jmax=self.jmax,
+            frame=frame,
+            rtp=self.rtp,
+        )
+
+    @property
+    def ocs(self) -> Zernikes:
+        """This Zernikes in the OCS frame."""
+        if self.frame == "ocs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(-rtp, "ocs")
+
+    @property
+    def ccs(self) -> Zernikes:
+        """This Zernikes in the CCS frame."""
+        if self.frame == "ccs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(rtp, "ccs")
+
+    def to_galsim(
+        self,
+        idx: int | None = None,
+        unit: u.Unit = u.um,
+    ) -> galsim.zernike.Zernike:
+        """Return a `galsim.zernike.Zernike` for one set of coefficients.
+
+        Parameters
+        ----------
+        idx : int or None
+            Index into the batch dimension.  Required when
+            ``coefs`` has more than one dimension; ignored for a
+            single (1-D) coefficient vector.
+        unit : astropy.units.Unit
+            Unit for the output coefficients (default: micron).
+        """
+        c = self.coefs if self.coefs.ndim == 1 else self.coefs[idx]
+        if c.ndim != 1:
+            raise TypeError("to_galsim() requires a single coefficient vector")
+        return galsim.zernike.Zernike(
+            c.to(unit).value,
+            R_outer=self.R_outer,
+            R_inner=self.R_inner,
+        )
+
+
+@dataclass(frozen=True)
+class State:
+    """Alignment state in either the nominal DOF basis or the
+    SVD-truncated orthogonal basis.
+
+    At least one of ``xstate`` or ``vstate`` must be provided.
+    ``use_dof`` is always required.  When ``vstate`` is the
+    primary input, ``Vh`` and ``nkeep`` are also required so
+    that ``xstate`` can be derived.
+
+    Prefer constructing via `StateFactory` rather than directly.
+
+    Parameters
+    ----------
+    xstate : NDArray or None
+        Coefficients in the nominal DOF basis (length = n_dof).
+    vstate : NDArray or None
+        Coefficients in the orthogonal (SVD) basis (length = nkeep).
+    use_dof : NDArray
+        Indices of the DOFs that were included in the fit.
+    Vh : NDArray or None
+        Right singular vectors from the sensitivity SVD, shape
+        ``(n_dof, n_dof)`` or ``(nkeep, n_dof)`` slice.  Required
+        when ``vstate`` is provided.
+    nkeep : int or None
+        Number of SVD modes retained.  Required when ``vstate``
+        is provided.
+    """
+
+    xstate: NDArray[np.floating] | None = None
+    vstate: NDArray[np.floating] | None = None
+    _: KW_ONLY
+    use_dof: NDArray[np.integer]
+    Vh: NDArray[np.floating] | None = None
+    nkeep: int | None = None
+
+    def __post_init__(self):
+        if self.xstate is None and self.vstate is None:
+            raise ValueError("At least one of xstate or vstate must be provided")
+        if self.vstate is not None and self.xstate is None:
+            if self.Vh is None or self.nkeep is None:
+                raise ValueError(
+                    "Vh and nkeep are required when only vstate is provided"
+                )
+            object.__setattr__(self, "xstate", self.vstate @ self.Vh[: self.nkeep])
+        if self.xstate is not None and self.vstate is None:
+            if self.Vh is not None and self.nkeep is not None:
+                object.__setattr__(
+                    self, "vstate", self.xstate @ self.Vh[: self.nkeep].T
+                )
+
+
+class StateFactory:
+    """Factory for creating `State` objects with shared configuration.
+
+    Parameters
+    ----------
+    use_dof : array-like
+        DOF indices for all states produced by this factory.
+    Vh : NDArray or None
+        Right singular vectors from the sensitivity SVD.
+    nkeep : int or None
+        Number of SVD modes retained.
+    """
+
+    def __init__(
+        self,
+        use_dof: NDArray[np.integer],
+        Vh: NDArray[np.floating] | None = None,
+        nkeep: int | None = None,
+    ):
+        self.use_dof = np.asarray(use_dof)
+        self.Vh = Vh
+        self.nkeep = nkeep
+
+    def from_xstate(self, xstate) -> State:
+        """Create a State from nominal-basis coefficients."""
+        return State(
+            xstate=np.asarray(xstate, dtype=float),
+            use_dof=self.use_dof,
+            Vh=self.Vh,
+            nkeep=self.nkeep,
+        )
+
+    def from_vstate(self, vstate) -> State:
+        """Create a State from orthogonal-basis coefficients."""
+        if self.Vh is None or self.nkeep is None:
+            raise ValueError("Vh and nkeep are required to create State from vstate")
+        return State(
+            vstate=np.asarray(vstate, dtype=float),
+            use_dof=self.use_dof,
+            Vh=self.Vh,
+            nkeep=self.nkeep,
+        )

@@ -64,7 +64,6 @@ def spot_size(
     optic: batoid.Optic,
     wavelength: float,
     nrad: int = 5,
-    naz: int = 30,
     outer: float = FIELD_OUTER
 ) -> NDArray[np.float64]:
     """
@@ -78,8 +77,6 @@ def spot_size(
         Wavelength in meters.
     nrad : int, optional
         Number of radial points in the field.
-    naz : int, optional
-        Number of azimuthal points at max field radius.
     outer : float, optional
         Outer field radius in degrees.
 
@@ -93,12 +90,16 @@ def spot_size(
     Ignores vignetting.
     Pupil is tuned to Rubin.
     """
+    naz = int(2 * np.pi * nrad)
     thx, thy = batoid.utils.hexapolar(
         outer=np.deg2rad(outer),
         inner=0.0,
         nrad=nrad,
         naz=naz,
     )
+
+    nrad_pupil = 3 * nrad
+    naz_pupil = int(2 * np.pi * nrad_pupil / (1-0.612))
 
     sizes = []
     for thx_, thy_ in zip(thx, thy):
@@ -107,8 +108,8 @@ def spot_size(
             wavelength=wavelength,
             theta_x=thx_,
             theta_y=thy_,
-            nrad=nrad * 3,  # 3x more pupil points than field
-            naz=naz * 3,
+            nrad=nrad_pupil,
+            naz=naz_pupil,
             outer=PUPIL_OUTER*0.99,  # Avoid clipping the actual pupil
             inner=PUPIL_INNER*1.01,
         )
