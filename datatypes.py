@@ -208,6 +208,11 @@ class FieldCoords:
             camera=self.camera,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"FieldCoords({self.x!r}, {self.y!r}, frame={self.frame!r})"
+        )
+
 
 @dataclass(frozen=True)
 class Spots:
@@ -311,6 +316,11 @@ class Spots:
             return self
         rtp = self._require("rtp")
         return self._rot(rtp, "ccs")
+
+    def __repr__(self) -> str:
+        return (
+            f"Spots(frame={self.frame!r})"
+        )
 
 
 @dataclass(frozen=True)
@@ -445,6 +455,11 @@ class Zernikes:
             c.to(unit).value,
             R_outer=self.R_outer.to_value(radius_unit),
             R_inner=self.R_inner.to_value(radius_unit),
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"Zernikes({self.coefs!r}, jmax={self.jmax}, frame={self.frame!r})"
         )
 
 
@@ -585,6 +600,11 @@ class State:
             n_dof=self.n_dof,
             Vh=self.Vh,
             nkeep=self.nkeep,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"State({self.state!r}, basis={self.basis!r})"
         )
 
 
