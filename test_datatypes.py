@@ -1,19 +1,19 @@
 """Unit tests for FieldCoords, Spots, and Zernikes."""
+
 from __future__ import annotations
 
+import astropy.units as u
+import galsim
 import numpy as np
 import pytest
-import astropy.units as u
 from astropy.coordinates import Angle
 
-import galsim
-
-from datatypes import FieldCoords, Spots, Zernikes, State, StateFactory
-
+from datatypes import FieldCoords, Spots, State, StateFactory, Zernikes
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_field(
     n: int = 3,
@@ -33,6 +33,7 @@ RTP = Angle(0.25, unit=u.rad)
 # ===================================================================
 # FieldCoords
 # ===================================================================
+
 
 class TestFieldCoordsConstruction:
     def test_scalar_promoted_to_1d(self):
@@ -91,22 +92,34 @@ class TestFieldCoordsFrameRotation:
     def test_ocs_then_ccs_roundtrip(self):
         fc = _make_field(frame="ocs", rtp=RTP)
         rt = fc.ccs.ocs
-        np.testing.assert_allclose(rt.x.to_value(u.deg), fc.x.to_value(u.deg), atol=1e-12)
-        np.testing.assert_allclose(rt.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-12)
+        np.testing.assert_allclose(
+            rt.x.to_value(u.deg), fc.x.to_value(u.deg), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            rt.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-12
+        )
         assert rt.frame == "ocs"
 
     def test_ccs_then_ocs_roundtrip(self):
         fc = _make_field(frame="ccs", rtp=RTP)
         rt = fc.ocs.ccs
-        np.testing.assert_allclose(rt.x.to_value(u.deg), fc.x.to_value(u.deg), atol=1e-12)
-        np.testing.assert_allclose(rt.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-12)
+        np.testing.assert_allclose(
+            rt.x.to_value(u.deg), fc.x.to_value(u.deg), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            rt.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-12
+        )
         assert rt.frame == "ccs"
 
     def test_zero_rtp_is_identity(self):
         fc = _make_field(frame="ocs", rtp=Angle(0, unit=u.rad))
         ccs = fc.ccs
-        np.testing.assert_allclose(ccs.x.to_value(u.deg), fc.x.to_value(u.deg), atol=1e-12)
-        np.testing.assert_allclose(ccs.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-12)
+        np.testing.assert_allclose(
+            ccs.x.to_value(u.deg), fc.x.to_value(u.deg), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            ccs.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-12
+        )
 
     def test_90deg_rotation(self):
         rtp = Angle(np.pi / 2, unit=u.rad)
@@ -159,6 +172,7 @@ class TestFieldCoordsSlicing:
 # ===================================================================
 # Spots
 # ===================================================================
+
 
 def _make_spots(
     n_field: int = 3,
@@ -293,6 +307,7 @@ class TestSpotsSlicing:
 # ===================================================================
 # Zernikes
 # ===================================================================
+
 
 def _make_zernikes(
     n_field: int = 1,
@@ -449,6 +464,7 @@ class TestZernikesToGalsim:
 # State
 # ===================================================================
 
+
 def _make_Vh(n_active, rng=None):
     """Build an orthogonal Vh matrix of shape (n_active, n_active)."""
     if rng is None:
@@ -474,15 +490,15 @@ class TestStateConstruction:
 
     def test_from_v(self):
         Vh = _make_Vh(5)
-        s = State(state=np.ones(3), basis="v", Vh=Vh, nkeep=3,
-                  use_dof=np.arange(5), n_dof=10)
+        s = State(
+            state=np.ones(3), basis="v", Vh=Vh, nkeep=3, use_dof=np.arange(5), n_dof=10
+        )
         assert s.basis == "v"
         assert s.nkeep == 3
 
     def test_nkeep_inferred_from_Vh(self):
         Vh = _make_Vh(5)
-        s = State(state=np.ones(5), basis="x", use_dof=np.arange(5),
-                  n_dof=10, Vh=Vh)
+        s = State(state=np.ones(5), basis="x", use_dof=np.arange(5), n_dof=10, Vh=Vh)
         assert s.nkeep == 5  # inferred from Vh.shape[0]
 
     def test_invalid_basis(self):
@@ -501,8 +517,12 @@ class TestStateConstruction:
 
 class TestStateConversions:
     def test_x_identity(self):
-        s = State(state=np.array([1.0, 2.0, 3.0]), basis="x",
-                  use_dof=np.array([0, 2, 5]), n_dof=10)
+        s = State(
+            state=np.array([1.0, 2.0, 3.0]),
+            basis="x",
+            use_dof=np.array([0, 2, 5]),
+            n_dof=10,
+        )
         assert s.x is s
 
     def test_f_identity(self):
@@ -511,8 +531,9 @@ class TestStateConversions:
 
     def test_v_identity(self):
         Vh = _make_Vh(5)
-        s = State(state=np.ones(3), basis="v", Vh=Vh, nkeep=3,
-                  use_dof=np.arange(5), n_dof=10)
+        s = State(
+            state=np.ones(3), basis="v", Vh=Vh, nkeep=3, use_dof=np.arange(5), n_dof=10
+        )
         assert s.v is s
 
     def test_x_to_f_roundtrip(self):
@@ -540,8 +561,14 @@ class TestStateConversions:
         n_active = 5
         Vh = _make_Vh(n_active)
         xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        s = State(state=xvals, basis="x", use_dof=np.arange(n_active),
-                  n_dof=10, Vh=Vh, nkeep=n_active)
+        s = State(
+            state=xvals,
+            basis="x",
+            use_dof=np.arange(n_active),
+            n_dof=10,
+            Vh=Vh,
+            nkeep=n_active,
+        )
         np.testing.assert_allclose(s.v.x.state, xvals, atol=1e-12)
 
     def test_x_to_v_lossy_truncated(self):
@@ -550,8 +577,14 @@ class TestStateConversions:
         nkeep = 3
         Vh = _make_Vh(n_active)
         xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        s = State(state=xvals, basis="x", use_dof=np.arange(n_active),
-                  n_dof=10, Vh=Vh, nkeep=nkeep)
+        s = State(
+            state=xvals,
+            basis="x",
+            use_dof=np.arange(n_active),
+            n_dof=10,
+            Vh=Vh,
+            nkeep=nkeep,
+        )
         recovered = s.v.x.state
         # Not exactly equal (lossy)
         assert not np.allclose(recovered, xvals)
@@ -563,8 +596,7 @@ class TestStateConversions:
         use_dof = np.array([1, 3, 5, 7])
         Vh = _make_Vh(n_active)
         vvals = np.ones(3)
-        s = State(state=vvals, basis="v", use_dof=use_dof, n_dof=10,
-                  Vh=Vh, nkeep=3)
+        s = State(state=vvals, basis="v", use_dof=use_dof, n_dof=10, Vh=Vh, nkeep=3)
         fs = s.f
         assert fs.basis == "f"
         assert len(fs.state) == 10

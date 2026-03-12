@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import batoid
 from dataclasses import dataclass
 from typing import Optional
 
 import astropy.units as u
+import batoid
 import galsim
 import numpy as np
 from astropy.coordinates import Angle
@@ -89,15 +89,20 @@ class FieldCoords:
             rtp = Angle("0 deg")
         rotated = telescope.withLocallyRotatedOptic("LSSTCamera", batoid.RotZ(rtp.rad))
         nrad = 20
-        th_u, th_v = batoid.utils.hexapolar(np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad))
+        th_u, th_v = batoid.utils.hexapolar(
+            np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad)
+        )
         rays = batoid.RayVector.fromFieldAngles(
-            theta_x=th_u, theta_y=th_v,
+            theta_x=th_u,
+            theta_y=th_v,
             projection="gnomonic",
             optic=rotated,
             wavelength=wavelength.to_value(u.m),
         )
         rotated.trace(rays)
-        wcs = galsim.FittedSIPWCS(rays.x*1000, rays.y*1000, th_u, th_v, order=3)  # Use mm <-> radians
+        wcs = galsim.FittedSIPWCS(
+            rays.x * 1000, rays.y * 1000, th_u, th_v, order=3
+        )  # Use mm <-> radians
         return cls(x, y, rtp=rtp, wcs=wcs, **kwargs)
 
     @property
@@ -216,9 +221,7 @@ class FieldCoords:
         )
 
     def __repr__(self) -> str:
-        return (
-            f"FieldCoords({self.x!r}, {self.y!r}, frame={self.frame!r})"
-        )
+        return f"FieldCoords({self.x!r}, {self.y!r}, frame={self.frame!r})"
 
 
 @dataclass(frozen=True)
@@ -289,9 +292,7 @@ class Spots:
         """Return the instance attribute or raise if not set."""
         val = getattr(self, name)
         if val is None:
-            raise ValueError(
-                f"{name} must be set on the Spots to use this property"
-            )
+            raise ValueError(f"{name} must be set on the Spots to use this property")
         return val
 
     def _rot(self, angle: Angle, frame: str) -> Spots:
@@ -325,9 +326,7 @@ class Spots:
         return self._rot(rtp, "ccs")
 
     def __repr__(self) -> str:
-        return (
-            f"Spots(frame={self.frame!r})"
-        )
+        return f"Spots(frame={self.frame!r})"
 
 
 @dataclass(frozen=True)
@@ -402,12 +401,10 @@ class Zernikes:
         """Return the instance attribute or raise if not set."""
         val = getattr(self, name)
         if val is None:
-            raise ValueError(
-                f"{name} must be set on the Zernikes to use this property"
-            )
+            raise ValueError(f"{name} must be set on the Zernikes to use this property")
         return val
 
-    def _rot(self, angle: Angle, frame:str) -> Zernikes:
+    def _rot(self, angle: Angle, frame: str) -> Zernikes:
         """Return a new Zernikes with the coefficients rotated by *angle*."""
         rot = galsim.zernike.zernikeRotMatrix(self.jmax, angle.radian)
         coefs_rot = self.coefs @ rot
@@ -465,9 +462,7 @@ class Zernikes:
         )
 
     def __repr__(self) -> str:
-        return (
-            f"Zernikes({self.coefs!r}, jmax={self.jmax}, frame={self.frame!r})"
-        )
+        return f"Zernikes({self.coefs!r}, jmax={self.jmax}, frame={self.frame!r})"
 
 
 VALID_BASES = ("x", "f", "v")
@@ -526,9 +521,7 @@ class State:
     def __post_init__(self):
         object.__setattr__(self, "state", np.asarray(self.state, dtype=float))
         if self.basis not in VALID_BASES:
-            raise ValueError(
-                f"basis must be one of {VALID_BASES}, got {self.basis!r}"
-            )
+            raise ValueError(f"basis must be one of {VALID_BASES}, got {self.basis!r}")
         if self.basis == "f" and self.n_dof is None:
             object.__setattr__(self, "n_dof", len(self.state))
         if self.basis == "v" and self.Vh is None:
@@ -541,9 +534,7 @@ class State:
     def _require(self, name: str):
         val = getattr(self, name)
         if val is None:
-            raise ValueError(
-                f"{name} must be set on the State to use this conversion"
-            )
+            raise ValueError(f"{name} must be set on the State to use this conversion")
         return val
 
     @property
@@ -610,9 +601,7 @@ class State:
         )
 
     def __repr__(self) -> str:
-        return (
-            f"State({self.state!r}, basis={self.basis!r})"
-        )
+        return f"State({self.state!r}, basis={self.basis!r})"
 
 
 class StateFactory:
