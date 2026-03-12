@@ -35,10 +35,6 @@ class FieldCoords:
         WCS for converting between field-angle and focal-plane space.  Required for
         space conversions.  WCS assumes field angles are in radians and focal-plane
         coordinates are in mm.
-    telescope : batoid.Optic or None
-        Telescope model for creating WCS.
-    wavelength : Quantity or None
-        Wavelength to use for creating WCS.
     camera : Camera or None
         Camera geometry for determining detector numbers.  Required for
         ``detnum`` property.
@@ -49,8 +45,6 @@ class FieldCoords:
     frame: str = "ocs"
     rtp: Optional[Angle] = None
     wcs: Optional[GSFitsWCS] = None
-    telescope: Optional[batoid.Optic] = None
-    wavelength: Optional[Quantity] = None
     camera: Optional[Camera] = None
 
     def __post_init__(self):
@@ -70,23 +64,6 @@ class FieldCoords:
                 f"units must be angular or length, "
                 f"got physical type {self.x.unit.physical_type!r}"
             )
-        if self.telescope is not None:
-            if self.wcs is not None:
-                raise ValueError("Cannot specify both telescope and wcs")
-            rtp = self._require("rtp")
-            wavelength = self._require("wavelength")
-            rotated = self.telescope.withLocallyRotatedOptic("LSSTCamera", batoid.RotZ(rtp.rad))
-            nrad = 20
-            th_u, th_v = batoid.utils.hexapolar(np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad))
-            rays = batoid.RayVector.fromFieldAngles(
-                theta_x=th_u, theta_y=th_v,
-                projection="gnomonic",
-                optic=rotated,
-                wavelength=wavelength.to_value(u.m),
-            )
-            rotated.trace(rays)
-            wcs = galsim.FittedSIPWCS(rays.x*1000, rays.y*1000, th_u, th_v, order=3)  # Use mm <-> radians
-            object.__setattr__(self, "wcs", wcs)
 
     def _require(self, name: str):
         """Return the instance attribute or raise if not set."""
@@ -96,6 +73,32 @@ class FieldCoords:
                 f"{name} must be set on the FieldCoords to use this property"
             )
         return val
+
+    @classmethod
+    def from_telescope_wcs(
+        cls,
+        x: Quantity,
+        y: Quantity,
+        *,
+        telescope: batoid.Optic,
+        wavelength: Quantity,
+        rtp: Optional[Angle] = None,
+        **kwargs,
+    ):
+        if rtp is None:
+            rtp = Angle("0 deg")
+        rotated = telescope.withLocallyRotatedOptic("LSSTCamera", batoid.RotZ(rtp.rad))
+        nrad = 20
+        th_u, th_v = batoid.utils.hexapolar(np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad))
+        rays = batoid.RayVector.fromFieldAngles(
+            theta_x=th_u, theta_y=th_v,
+            projection="gnomonic",
+            optic=rotated,
+            wavelength=wavelength.to_value(u.m),
+        )
+        rotated.trace(rays)
+        wcs = galsim.FittedSIPWCS(rays.x*1000, rays.y*1000, th_u, th_v, order=3)  # Use mm <-> radians
+        return cls(x, y, rtp=rtp, wcs=wcs, **kwargs)
 
     @property
     def space(self) -> str:

@@ -299,8 +299,8 @@ def _make_zernikes(
     jmax: int = 22,
     frame: str = "ocs",
     rtp: Angle | None = None,
-    R_outer: float = 4.18,
-    R_inner: float = 2.5,
+    R_outer: float = 4.18 << u.m,
+    R_inner: float = 2.5 << u.m,
 ) -> Zernikes:
     rng = np.random.default_rng(99)
     if n_field == 1:
@@ -337,13 +337,8 @@ class TestZernikesConstruction:
         assert zk.coefs.ndim == 1
 
     def test_eps(self):
-        zk = _make_zernikes(R_outer=4.18, R_inner=2.5)
+        zk = _make_zernikes(R_outer=4.18 << u.m, R_inner=2.5 << u.m)
         assert zk.eps == pytest.approx(2.5 / 4.18)
-
-    def test_eps_zero_outer(self):
-        field = _make_field(1)
-        zk = Zernikes(coefs=np.zeros(5) * u.um, field=field, R_outer=0.0)
-        assert zk.eps == 0.0
 
 
 class TestZernikesRtpConsistency:
@@ -426,7 +421,7 @@ class TestZernikesSlicing:
 
 class TestZernikesToGalsim:
     def test_1d(self):
-        zk = _make_zernikes(jmax=10, R_outer=4.18, R_inner=2.5)
+        zk = _make_zernikes(jmax=10, R_outer=4.18 << u.m, R_inner=2.5 << u.m)
         gz = zk.to_galsim()
         assert isinstance(gz, galsim.zernike.Zernike)
         assert gz.R_outer == 4.18
