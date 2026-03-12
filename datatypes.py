@@ -37,6 +37,8 @@ class FieldCoords:
         coordinates are in mm.
     telescope : batoid.Optic or None
         Telescope model for creating WCS.
+    wavelength : Quantity or None
+        Wavelength to use for creating WCS.
     camera : Camera or None
         Camera geometry for determining detector numbers.  Required for
         ``detnum`` property.
@@ -48,6 +50,7 @@ class FieldCoords:
     rtp: Optional[Angle] = None
     wcs: Optional[GSFitsWCS] = None
     telescope: Optional[batoid.Optic] = None
+    wavelength: Optional[Quantity] = None
     camera: Optional[Camera] = None
 
     def __post_init__(self):
@@ -71,6 +74,7 @@ class FieldCoords:
             if self.wcs is not None:
                 raise ValueError("Cannot specify both telescope and wcs")
             rtp = self._require("rtp")
+            wavelength = self._require("wavelength")
             rotated = self.telescope.withLocallyRotatedOptic("LSSTCamera", batoid.RotZ(rtp.rad))
             nrad = 20
             th_u, th_v = batoid.utils.hexapolar(np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad))
@@ -78,7 +82,7 @@ class FieldCoords:
                 theta_x=th_u, theta_y=th_v,
                 projection="gnomonic",
                 optic=rotated,
-                wavelength=622e-9,  # ! Ack
+                wavelength=wavelength.to_value(u.m),
             )
             rotated.trace(rays)
             wcs = galsim.FittedSIPWCS(rays.x*1000, rays.y*1000, th_u, th_v, order=3)  # Use mm <-> radians
