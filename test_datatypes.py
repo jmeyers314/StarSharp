@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from astropy.coordinates import Angle
 
-from datatypes import FieldCoords, Spots, State, StateFactory, Zernikes
+from datatypes import FieldCoords, Moments, Moments2, Moments3, Moments4, Spots, State, StateFactory, Zernikes
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -690,3 +690,141 @@ class TestStateFactory:
         s = sf.from_x(xvals)
         # Full chain: x -> f -> x -> v -> x
         np.testing.assert_allclose(s.f.x.v.x.state, xvals, atol=1e-12)
+
+
+# ===================================================================
+# Moments
+# ===================================================================
+
+
+class TestMomentsConstruction:
+    def test_moments2_fields(self):
+        m = Moments[2](xx=1.0 * u.mm**2, xy=0.5 * u.mm**2, yy=2.0 * u.mm**2)
+        assert m.xx == 1.0 * u.mm**2
+        assert m.xy == 0.5 * u.mm**2
+        assert m.yy == 2.0 * u.mm**2
+
+    def test_moments3_fields(self):
+        m = Moments[3](
+            xxx=1.0 * u.mm**3,
+            xxy=2.0 * u.mm**3,
+            xyy=3.0 * u.mm**3,
+            yyy=4.0 * u.mm**3,
+        )
+        assert m.xxx == 1.0 * u.mm**3
+        assert m.xxy == 2.0 * u.mm**3
+        assert m.xyy == 3.0 * u.mm**3
+        assert m.yyy == 4.0 * u.mm**3
+
+    def test_moments4_fields(self):
+        m = Moments[4](
+            xxxx=1.0 * u.mm**4,
+            xxxy=0.0 * u.mm**4,
+            xxyy=0.5 * u.mm**4,
+            xyyy=0.0 * u.mm**4,
+            yyyy=1.0 * u.mm**4,
+        )
+        assert m.xxxx == 1.0 * u.mm**4
+        assert m.xxxy == 0.0 * u.mm**4
+        assert m.xxyy == 0.5 * u.mm**4
+        assert m.xyyy == 0.0 * u.mm**4
+        assert m.yyyy == 1.0 * u.mm**4
+
+    def test_concrete_class_moments2(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        assert isinstance(m, Moments)
+        assert isinstance(m, Moments2)
+        assert isinstance(m, Moments[2])
+
+    def test_concrete_class_moments3(self):
+        m = Moments3(
+            xxx=0.0 * u.mm**3,
+            xxy=0.0 * u.mm**3,
+            xyy=0.0 * u.mm**3,
+            yyy=0.0 * u.mm**3,
+        )
+        assert isinstance(m, Moments)
+        assert isinstance(m, Moments3)
+        assert isinstance(m, Moments[3])
+
+    def test_concrete_class_moments4(self):
+        m = Moments4(
+            xxxx=1.0 * u.mm**4,
+            xxxy=0.0 * u.mm**4,
+            xxyy=0.5 * u.mm**4,
+            xyyy=0.0 * u.mm**4,
+            yyyy=1.0 * u.mm**4,
+        )
+        assert isinstance(m, Moments)
+        assert isinstance(m, Moments4)
+        assert isinstance(m, Moments[4])
+
+    def test_generic_and_concrete_same_type(self):
+        """Moments[2](...) and Moments2(...) produce instances of the same class."""
+        m_generic = Moments[2](xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        m_concrete = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        assert type(m_generic) is type(m_concrete)
+
+    def test_caching(self):
+        """Moments[n] returns the same class object on repeated calls."""
+        assert Moments[2] is Moments[2]
+        assert Moments[3] is Moments[3]
+
+    def test_frozen(self):
+        """Moment instances are immutable."""
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        with pytest.raises(Exception):
+            m.xx = 99.0 * u.mm**2
+
+
+class TestMomentsMetadata:
+    def test_default_frame_is_ocs(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        assert m.frame == "ocs"
+
+    def test_explicit_frame_ccs(self):
+        m = Moments2(
+            xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2,
+            frame="ccs",
+        )
+        assert m.frame == "ccs"
+
+    def test_default_field_is_none(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        assert m.field is None
+
+    def test_field_attached(self):
+        fc = FieldCoords(x=0.5 * u.deg, y=0.5 * u.deg, frame="ocs")
+        m = Moments2(
+            xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2,
+            field=fc,
+        )
+        assert m.field is fc
+
+    def test_rtp_attached(self):
+        rtp = Angle(0.25, unit=u.rad)
+        m = Moments2(
+            xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2,
+            rtp=rtp,
+        )
+        assert m.rtp is rtp
+
+
+class TestMomentsIsinstance:
+    def test_moments2_isinstance_moments(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        assert isinstance(m, Moments)
+
+    def test_moments3_isinstance_moments(self):
+        m = Moments3(
+            xxx=0.0 * u.mm**3, xxy=0.0 * u.mm**3,
+            xyy=0.0 * u.mm**3, yyy=0.0 * u.mm**3,
+        )
+        assert isinstance(m, Moments)
+
+    def test_moments4_isinstance_moments(self):
+        m = Moments4(
+            xxxx=1.0 * u.mm**4, xxxy=0.0 * u.mm**4,
+            xxyy=0.5 * u.mm**4, xyyy=0.0 * u.mm**4, yyyy=1.0 * u.mm**4,
+        )
+        assert isinstance(m, Moments)

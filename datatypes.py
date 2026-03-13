@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import itertools
+import dataclasses
+from dataclasses import dataclass, field, make_dataclass
 from typing import Optional
 
 import astropy.units as u
@@ -682,3 +684,99 @@ class StateFactory:
             Vh=self.Vh,
             nkeep=self.nkeep,
         )
+
+
+class Moments:
+    """Generic container for 2D image moments of order n.
+
+    Use ``Moments[n]`` to obtain the concrete dataclass for a given order,
+    e.g. ``Moments[2]``, ``Moments[3]``, ``Moments[4]``.
+
+    Fields are named by all symmetric index combinations of 'x' and 'y',
+    e.g. ``xx``, ``xy``, ``yy`` for order 2.
+
+    All moment fields are `~astropy.units.Quantity` instances.
+    Use ``frame`` to record the coordinate frame (``'ocs'`` or ``'ccs'``)
+    and ``field`` to attach the corresponding `FieldCoords`.
+
+    Use the ``@Moments.specialize(order)`` decorator to register a
+    specialized subclass for a given order.  Once registered,
+    ``Moments[order]`` returns the specialized class.
+
+    Examples
+    --------
+    >>> m2 = Moments[2](xx=1.0*u.mm**2, xy=0.0*u.mm**2, yy=1.0*u.mm**2)
+    >>> m3 = Moments[3](xxx=0.0*u.mm**3, xxy=0.0*u.mm**3, xyy=0.0*u.mm**3, yyy=0.0*u.mm**3)
+    """
+
+    _cache: dict = {}
+    _specialized: dict = {}
+
+    @classmethod
+    def specialize(cls, order: int):
+        """Decorator to register a specialized implementation for an order."""
+        def deco(subcls: type):
+            cls._specialized[order] = subcls
+            cls._cache[order] = subcls
+            return subcls
+        return deco
+
+    @classmethod
+    def __class_getitem__(cls, order: int) -> type:
+        if order in cls._specialized:
+            return cls._specialized[order]
+        if order not in cls._cache:
+            moment_names = [
+                ''.join(p)
+                for p in itertools.combinations_with_replacement('xy', order)
+            ]
+            moment_fields = [(f, Quantity) for f in moment_names]
+            meta_fields = [
+                ('frame', str, dataclasses.field(default='ocs')),
+                ('field', Optional[FieldCoords], dataclasses.field(default=None)),
+                ('rtp', Optional[Angle], dataclasses.field(default=None)),
+            ]
+            cls._cache[order] = make_dataclass(
+                f"Moments{order}",
+                moment_fields + meta_fields,
+                bases=(cls,),
+                frozen=True,
+            )
+        return cls._cache[order]
+
+
+@Moments.specialize(2)
+class Moments2(Moments[2]):
+    """Second-order moments with hard-coded coordinate transformations.
+
+    Fields: ``xx``, ``xy``, ``yy``.
+
+    Spin decomposition:
+      - Spin-0 (scalar): ``xx + yy``
+      - Spin-2 components: ``xx - yy``, ``2*xy``
+    """
+
+
+@Moments.specialize(3)
+class Moments3(Moments[3]):
+    """Third-order moments with hard-coded coordinate transformations.
+
+    Fields: ``xxx``, ``xxy``, ``xyy``, ``yyy``.
+
+    Spin decomposition:
+      - Spin-1 components: ``xxx + xyy``, ``yyy + xxy``
+      - Spin-3 components: ``xxx - 3*xyy``, ``yyy - 3*xxy``
+    """
+
+
+@Moments.specialize(4)
+class Moments4(Moments[4]):
+    """Fourth-order moments with hard-coded coordinate transformations.
+
+    Fields: ``xxxx``, ``xxxy``, ``xxyy``, ``xyyy``, ``yyyy``.
+
+    Spin decomposition:
+      - Spin-0 (scalar): ``xxxx + 2*xxyy + yyyy``
+      - Spin-2 components: ``xxxx - yyyy``, ``2*(xxxy + xyyy)``
+      - Spin-4 components: ``xxxx - 6*xxyy + yyyy``, ``4*(xxxy - xyyy)``
+    """
