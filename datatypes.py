@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import itertools
 import dataclasses
-from dataclasses import dataclass, field, make_dataclass
+from dataclasses import dataclass, make_dataclass
 from typing import Optional
 
 import astropy.units as u
@@ -792,19 +792,12 @@ class Moments:
             )
         return val
 
-    def _rot(self, angle: Angle, frame: str):
-        """Return a new Moments with all moment components rotated by *angle*."""
-        c = float(np.cos(angle.rad))
-        s = float(np.sin(angle.rad))
-        R = np.array([[c, s], [-s, c]])
+    def _tensor(self):
+        """Build the full (non-symmetric) moment tensor as a plain ndarray."""
         order = self._moment_order
-
-        # Determine batch shape from one of the moment components
         sample = getattr(self, 'x' * order).value
         is_batched = sample.shape != ()
         batch_shape = sample.shape if is_batched else ()
-
-        # Build full (non-symmetric) tensor from symmetric named moments
         T = np.zeros(batch_shape + (2,) * order, dtype=sample.dtype)
         for idx_tuple in itertools.product([0, 1], repeat=order):
             canonical = tuple(sorted(idx_tuple))
@@ -813,6 +806,17 @@ class Moments:
                 T[(slice(None),) + idx_tuple] = getattr(self, name).value
             else:
                 T[idx_tuple] = getattr(self, name).value
+        return T
+
+    def _rot(self, angle: Angle, frame: str):
+        """Return a new Moments with all moment components rotated by *angle*."""
+        c = float(np.cos(angle.rad))
+        s = float(np.sin(angle.rad))
+        R = np.array([[c, s], [-s, c]])
+        order = self._moment_order
+        is_batched = getattr(self, 'x' * order).value.shape != ()
+
+        T = self._tensor()
 
         # Apply rotation: contract R along each index axis in turn (over last axes)
         T_rot = T.copy()
@@ -852,6 +856,58 @@ class Moments:
         rtp = self._require('rtp')
         return self._rot(rtp, 'ccs')
 
+    def spin(self, n, m):
+        """Return the (n, m) spin-decomposed moment component.
+
+        Uses the complex representation z = x + iy to decompose the
+        symmetric moment tensor into spin components via
+        M_{p,q} = <z^p zbar^q> where p = (order+n)/2, q = (order-n)/2.
+
+        Parameters
+        ----------
+        n : int
+            Spin quantum number.  Must be non-negative, <= order, and
+            have the same parity as the moment order.
+        m : int
+            Selects the real (+n) or imaginary (-n) part.  Must be
+            +n or -n (or 0 when n = 0).
+
+        Returns
+        -------
+        Quantity
+            The spin-decomposed moment component (unnormalized).
+        """
+        order = self._moment_order
+        if n < 0 or n > order or (n % 2) != (order % 2):
+            raise ValueError(
+                f"Invalid spin n={n} for order-{order} moments; "
+                f"n must satisfy 0 <= n <= {order} with same parity"
+            )
+        if n == 0 and m != 0:
+            raise ValueError(f"For n=0, m must be 0, got m={m}")
+        if n > 0 and m not in (n, -n):
+            raise ValueError(f"For n={n}, m must be +/-{n}, got m={m}")
+
+        p = (order + n) // 2
+        q = (order - n) // 2
+
+        T = self._tensor()
+        unit = getattr(self, 'x' * order).unit
+
+        ez = np.array([1, 1j])
+        ezbar = np.array([1, -1j])
+
+        result = T
+        for _ in range(p):
+            result = np.tensordot(result, ez, axes=([-1], [0]))
+        for _ in range(q):
+            result = np.tensordot(result, ezbar, axes=([-1], [0]))
+
+        if m >= 0:
+            return result.real * unit
+        else:
+            return result.imag * unit
+
 
 @Moments.specialize(2)
 class Moments2(Moments[2]):
@@ -863,6 +919,21 @@ class Moments2(Moments[2]):
       - Spin-0 (scalar): ``xx + yy``
       - Spin-2 components: ``xx - yy``, ``2*xy``
     """
+
+    @property
+    def T(self):
+        """Trace: xx + yy."""
+        return self.xx + self.yy
+
+    @property
+    def e1(self):
+        """Ellipticity e1: (xx - yy) / T."""
+        return (self.xx - self.yy) / self.T
+
+    @property
+    def e2(self):
+        """Ellipticity e2: 2 * xy / T."""
+        return 2 * self.xy / self.T
 
 
 @Moments.specialize(3)

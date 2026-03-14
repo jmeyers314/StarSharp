@@ -1192,3 +1192,220 @@ class TestSpotsComputeMoments:
                     "batched moments_ccs.ocs != spots_ocs.compute_moments"
                 ),
             )
+
+
+# ===================================================================
+# Moments.spin and Moments2 properties
+# ===================================================================
+
+
+class TestMoments2Properties:
+    """Tests for T, e1, e2 on Moments2."""
+
+    def test_T_value(self):
+        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
+        assert m.T.value == pytest.approx(5.0)
+        assert m.T.unit == u.mm**2
+
+    def test_e1_value(self):
+        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
+        assert m.e1.value == pytest.approx(-1.0 / 5.0)
+
+    def test_e2_value(self):
+        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
+        assert m.e2.value == pytest.approx(2.0 / 5.0)
+
+    def test_e1_e2_dimensionless(self):
+        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
+        assert m.e1.unit == u.dimensionless_unscaled
+        assert m.e2.unit == u.dimensionless_unscaled
+
+
+class TestMomentsSpin:
+    """Tests for the generic spin(n, m) decomposition."""
+
+    # ------------------------------------------------------------------
+    # Spin-0 components equal known expressions
+    # ------------------------------------------------------------------
+    def test_spin00_moments2(self):
+        """spin(0, 0) for order 2 is xx + yy."""
+        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
+        np.testing.assert_allclose(m.spin(0, 0).value, (m.xx + m.yy).value, atol=1e-12)
+
+    def test_spin22_moments2(self):
+        """spin(2, 2) for order 2 is xx - yy."""
+        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
+        np.testing.assert_allclose(m.spin(2, 2).value, (m.xx - m.yy).value, atol=1e-12)
+
+    def test_spin2_neg2_moments2(self):
+        """spin(2, -2) for order 2 is 2*xy."""
+        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
+        np.testing.assert_allclose(m.spin(2, -2).value, (2 * m.xy).value, atol=1e-12)
+
+    def test_spin00_moments4(self):
+        """spin(0, 0) for order 4 is xxxx + 2*xxyy + yyyy."""
+        m = Moments4(
+            xxxx=1.0 * u.mm**4, xxxy=0.5 * u.mm**4, xxyy=0.25 * u.mm**4,
+            xyyy=0.5 * u.mm**4, yyyy=1.0 * u.mm**4,
+        )
+        expected = (m.xxxx + 2 * m.xxyy + m.yyyy).value
+        np.testing.assert_allclose(m.spin(0, 0).value, expected, atol=1e-12)
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+    def test_invalid_spin_raises(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        with pytest.raises(ValueError, match="Invalid spin"):
+            m.spin(1, 1)  # wrong parity for order 2
+
+    def test_invalid_m_raises(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        with pytest.raises(ValueError, match="m must be"):
+            m.spin(2, 0)  # m must be +/-2
+
+    def test_spin0_m_nonzero_raises(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
+        with pytest.raises(ValueError, match="m must be 0"):
+            m.spin(0, 1)
+
+    # ------------------------------------------------------------------
+    # Spin-n invariance under 2pi/n rotations
+    # ------------------------------------------------------------------
+    def test_spin2_invariant_under_180deg(self):
+        """Spin-2 components of order-2 moments are invariant under 180-deg rotation."""
+        rtp = Angle(np.pi, unit=u.rad)
+        m = Moments2(
+            xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2,
+            frame='ocs', rtp=rtp,
+        )
+        m_rot = m.ccs
+        for mm in (2, -2):
+            np.testing.assert_allclose(
+                m_rot.spin(2, mm).value,
+                m.spin(2, mm).value,
+                atol=1e-12,
+                err_msg=f"spin(2, {mm}) not invariant under 180-deg rotation",
+            )
+
+    def test_spin0_invariant_under_180deg(self):
+        """Spin-0 component of order-2 moments is invariant under 180-deg rotation."""
+        rtp = Angle(np.pi, unit=u.rad)
+        m = Moments2(
+            xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2,
+            frame='ocs', rtp=rtp,
+        )
+        m_rot = m.ccs
+        np.testing.assert_allclose(
+            m_rot.spin(0, 0).value, m.spin(0, 0).value, atol=1e-12,
+        )
+
+    def test_spin3_invariant_under_120deg(self):
+        """Spin-3 components of order-3 moments are invariant under 120-deg rotation."""
+        rtp = Angle(2 * np.pi / 3, unit=u.rad)
+        m = Moments3(
+            xxx=1.0 * u.mm**3, xxy=2.0 * u.mm**3,
+            xyy=3.0 * u.mm**3, yyy=4.0 * u.mm**3,
+            frame='ocs', rtp=rtp,
+        )
+        m_rot = m.ccs
+        for mm in (3, -3):
+            np.testing.assert_allclose(
+                m_rot.spin(3, mm).value,
+                m.spin(3, mm).value,
+                atol=1e-12,
+                err_msg=f"spin(3, {mm}) not invariant under 120-deg rotation",
+            )
+
+    def test_spin1_invariant_under_360deg(self):
+        """Spin-1 components of order-3 moments are invariant under 360-deg rotation."""
+        rtp = Angle(2 * np.pi, unit=u.rad)
+        m = Moments3(
+            xxx=1.0 * u.mm**3, xxy=2.0 * u.mm**3,
+            xyy=3.0 * u.mm**3, yyy=4.0 * u.mm**3,
+            frame='ocs', rtp=rtp,
+        )
+        m_rot = m.ccs
+        for mm in (1, -1):
+            np.testing.assert_allclose(
+                m_rot.spin(1, mm).value,
+                m.spin(1, mm).value,
+                atol=1e-12,
+                err_msg=f"spin(1, {mm}) not invariant under 360-deg rotation",
+            )
+
+    def test_spin4_invariant_under_90deg(self):
+        """Spin-4 components of order-4 moments are invariant under 90-deg rotation."""
+        rtp = Angle(np.pi / 2, unit=u.rad)
+        m = Moments4(
+            xxxx=1.0 * u.mm**4, xxxy=0.5 * u.mm**4, xxyy=0.25 * u.mm**4,
+            xyyy=0.5 * u.mm**4, yyyy=1.0 * u.mm**4,
+            frame='ocs', rtp=rtp,
+        )
+        m_rot = m.ccs
+        for mm in (4, -4):
+            np.testing.assert_allclose(
+                m_rot.spin(4, mm).value,
+                m.spin(4, mm).value,
+                atol=1e-12,
+                err_msg=f"spin(4, {mm}) not invariant under 90-deg rotation",
+            )
+
+    def test_spin2_invariant_under_180deg_order4(self):
+        """Spin-2 components of order-4 moments are invariant under 180-deg rotation."""
+        rtp = Angle(np.pi, unit=u.rad)
+        m = Moments4(
+            xxxx=1.0 * u.mm**4, xxxy=0.5 * u.mm**4, xxyy=0.25 * u.mm**4,
+            xyyy=0.5 * u.mm**4, yyyy=1.0 * u.mm**4,
+            frame='ocs', rtp=rtp,
+        )
+        m_rot = m.ccs
+        for mm in (2, -2):
+            np.testing.assert_allclose(
+                m_rot.spin(2, mm).value,
+                m.spin(2, mm).value,
+                atol=1e-12,
+                err_msg=f"spin(2, {mm}) of order-4 not invariant under 180-deg rotation",
+            )
+
+    def test_spin0_invariant_under_arbitrary_rotation(self):
+        """Spin-0 components are invariant under any rotation angle."""
+        rtp = Angle(1.234, unit=u.rad)
+        m2 = Moments2(
+            xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2,
+            frame='ocs', rtp=rtp,
+        )
+        m4 = Moments4(
+            xxxx=1.0 * u.mm**4, xxxy=0.5 * u.mm**4, xxyy=0.25 * u.mm**4,
+            xyyy=0.5 * u.mm**4, yyyy=1.0 * u.mm**4,
+            frame='ocs', rtp=rtp,
+        )
+        np.testing.assert_allclose(
+            m2.ccs.spin(0, 0).value, m2.spin(0, 0).value, atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            m4.ccs.spin(0, 0).value, m4.spin(0, 0).value, atol=1e-12,
+        )
+
+    def test_spin_not_invariant_under_wrong_angle(self):
+        """Spin-2 components should NOT be invariant under 90-deg rotation."""
+        rtp = Angle(np.pi / 2, unit=u.rad)
+        m = Moments2(
+            xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2,
+            frame='ocs', rtp=rtp,
+        )
+        m_rot = m.ccs
+        # spin-2 is NOT invariant under 90 deg (only 180 deg)
+        assert not np.allclose(m_rot.spin(2, 2).value, m.spin(2, 2).value, atol=1e-12)
+
+    # ------------------------------------------------------------------
+    # Batched moments
+    # ------------------------------------------------------------------
+    def test_spin_batched(self):
+        """spin() works on batched moments from compute_moments."""
+        sp = _make_spots_batched(n_field=4, n_ray=500)
+        m2 = sp.compute_moments(order=2)
+        # spin(0,0) should be array of length 4
+        s00 = m2.spin(0, 0)
+        assert s00.value.shape == (4,)
+        np.testing.assert_allclose(s00.value, (m2.xx + m2.yy).value, atol=1e-12)
