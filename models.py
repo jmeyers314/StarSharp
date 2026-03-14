@@ -16,26 +16,6 @@ PUPIL_INNER = PUPIL_OUTER * 0.612
 SIGMA_TO_FWHM = np.sqrt(np.log(256))
 
 
-# class OpticalModel:
-#     def __init__(
-#         self,
-#         pupil_radii: int = 10,
-#         jmax: int = 28,
-#         wavelength: Optional[float] = None,
-#         rtp: Optional[Angle] = None,
-#     ):
-#         self.pupil_radii = pupil_radii
-#         self.jmax = jmax
-#         self.wavelength = wavelength
-#         self.rtp = rtp
-
-#     def spot(self, state: State, coord: FieldCoords) -> Spots:
-#         ...
-
-#     def zernikes(self, state: State, coord: FieldCoords) -> Zernikes:
-#         ...
-
-
 class RaytracedOpticalModel:
     def __init__(
         self,
@@ -74,18 +54,17 @@ class RaytracedOpticalModel:
             .with_aos_dof(state.f.state)
         )
 
-        dx = []
-        dy = []
-        vignetted = []
+        dx = np.full((len(field.x), len(px)), np.nan)
+        dy = np.full((len(field.x), len(px)), np.nan)
+        vignetted = np.full((len(field.x), len(px)), True, dtype=bool)
+        fpx = np.full(len(field.x), np.nan)
+        fpy = np.full(len(field.x), np.nan)
 
         bar = self.tqdm(desc="Raytracing", total=len(field.x)) if self.tqdm is not None else None
-        for thx, thy, detnum in zip(field.x, field.y, field.detnum):
+        for ifield, (thx, thy, detnum) in enumerate(zip(field.x, field.y, field.detnum)):
             if bar:
                 bar.update(1)
             if detnum == -1:
-                dx.append(np.full_like(px, np.nan))
-                dy.append(np.full_like(px, np.nan))
-                vignetted.append(np.ones_like(px, dtype=bool))
                 continue
             telescope = builder.build_det(detnum)
             rays = batoid.RayVector.fromStop(
@@ -97,18 +76,31 @@ class RaytracedOpticalModel:
             )
             rays = telescope.trace(rays)
             w = ~rays.vignetted
-            dx.append(rays.x - np.mean(rays.x[w]))
-            dy.append(rays.y - np.mean(rays.y[w]))
-            vignetted.append(rays.vignetted)
+            fpx_ = np.mean(rays.x[w])
+            fpy_ = np.mean(rays.y[w])
 
+            dx[ifield] = rays.x - fpx_
+            dy[ifield] = rays.y - fpy_
+            vignetted[ifield] = rays.vignetted
+            fpx[ifield] = fpx_
+            fpy[ifield] = fpy_
+
+        out_field = FieldCoords(
+            x=fpx * 1e3 << u.m,
+            y=fpy * 1e3 << u.m,
+            frame="ccs",
+            rtp=self.rtp,
+            wcs=field.wcs,
+            camera=field.camera
+        )
         return Spots(
-            dx * u.m,
-            dy * u.m,
+            dx * 1e6 << u.micron,
+            dy * 1e6 << u.micron,
             vignetted,
-            field=field,
+            field=out_field,
             wavelength=self.wavelength,
             frame="ccs",
-            rtp=self.rtp
+            rtp=self.rtp,
         )
 
     def zernikes(
@@ -151,7 +143,7 @@ class RaytracedOpticalModel:
             zk.append(zkgq)
 
         return Zernikes(
-            coefs=np.array(zk) * self.wavelength.to(u.um),
+            coefs=zk * self.wavelength.to(u.um),
             field=field,
             R_outer=PUPIL_OUTER * u.m,
             R_inner=PUPIL_INNER * u.m,
@@ -160,35 +152,3 @@ class RaytracedOpticalModel:
             frame="ocs",
             rtp=self.rtp
         )
-
-
-
-
-
-
-
-# class LinearOpticalModel(OpticalModel):
-#     def __init__(
-#         self,
-#         intrinsic_ocs_spots: Spots,
-#         spot_derivatives: List[Spots],
-#         intrinsic_ocs_wavefront: Zernikes,
-#         wavefront_derivatives: List[Zernikes],
-#         ccs_spot_perturbation: Optional[Spots] = None,
-#         ccs_wavefront_perturbation: Optional[Zernikes] = None,
-#         wavelength: Optional[float] = None,
-#         rtp: Optional[Angle] = None,
-#     ):
-#         super().__init__(wavelength=wavelength, rtp=rtp)
-#         self.intrinsic_ocs_spots = intrinsic_ocs_spots
-#         self.spot_derivatives = spot_derivatives
-#         self.intrinsic_ocs_wavefront = intrinsic_ocs_wavefront
-#         self.wavefront_derivatives = wavefront_derivatives
-#         self.ccs_spot_perturbation = ccs_spot_perturbation
-#         self.ccs_wavefront_perturbation = ccs_wavefront_perturbation
-
-#     def spot(self, state: State, coord: FieldCoords) -> Spots:
-#         ...
-
-#     def zernikes(self, state: State, coord: FieldCoords) -> Zernikes:
-#         ...

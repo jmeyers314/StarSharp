@@ -330,6 +330,43 @@ class Spots:
     def __repr__(self) -> str:
         return f"Spots(frame={self.frame!r})"
 
+    def compute_moments(self, order: int = 2) -> Moments:
+        """Compute 2d moments of the spot diagrams (excluding vignetted spots).
+
+        Parameters
+        ----------
+        order : int
+            Order of the moments to compute (default: 2).
+
+        Returns
+        -------
+        Moments
+            Moments of the spot diagram.
+        """
+        if order < 1:
+            raise ValueError("Order must be at least 1")
+
+        # Convert to micron as a working unit and copy only if necessary
+        dx = self.dx.to_value(u.micron)
+        if np.shares_memory(dx, self.dx.value):
+            dx = dx.copy()
+        dy = self.dy.to_value(u.micron)
+        if np.shares_memory(dy, self.dy.value):
+            dy = dy.copy()
+        dx[self.vignetted] = np.nan
+        dy[self.vignetted] = np.nan
+
+        vals = {}
+        for ny in range(order + 1):
+            nx = order - ny
+            name = "x" * nx + "y" * ny
+            vals[name] = np.nanmean(
+                dx ** nx * dy ** ny,
+                axis=-1
+            ) << (u.micron ** order)
+
+        return Moments[order](**vals, frame=self.frame, field=self.field, rtp=self.rtp)
+
 
 @dataclass(frozen=True)
 class Zernikes:
@@ -762,18 +799,27 @@ class Moments:
         R = np.array([[c, s], [-s, c]])
         order = self._moment_order
 
+        # Determine batch shape from one of the moment components
+        sample = getattr(self, 'x' * order).value
+        is_batched = sample.shape != ()
+        batch_shape = sample.shape if is_batched else ()
+
         # Build full (non-symmetric) tensor from symmetric named moments
-        T = np.zeros([2] * order)
+        T = np.zeros(batch_shape + (2,) * order, dtype=sample.dtype)
         for idx_tuple in itertools.product([0, 1], repeat=order):
             canonical = tuple(sorted(idx_tuple))
             name = ''.join('xy'[i] for i in canonical)
-            T[idx_tuple] = getattr(self, name).value
+            if is_batched:
+                T[(slice(None),) + idx_tuple] = getattr(self, name).value
+            else:
+                T[idx_tuple] = getattr(self, name).value
 
-        # Apply rotation: contract R along each index axis in turn
+        # Apply rotation: contract R along each index axis in turn (over last axes)
         T_rot = T.copy()
         for axis in range(order):
-            T_rot = np.tensordot(R, T_rot, axes=([1], [axis]))
-            T_rot = np.moveaxis(T_rot, 0, axis)
+            axis_to_contract = -(order - axis)
+            T_rot = np.tensordot(R, T_rot, axes=([1], [axis_to_contract]))
+            T_rot = np.moveaxis(T_rot, 0, axis_to_contract)
 
         # Read back symmetric components, restoring units
         unit = getattr(self, 'x' * order).unit  # e.g. self.xx.unit for order 2
@@ -781,10 +827,13 @@ class Moments:
             ''.join(p)
             for p in itertools.combinations_with_replacement('xy', order)
         ]
-        new_moments = {
-            name: T_rot[tuple(0 if ch == 'x' else 1 for ch in name)] * unit
-            for name in moment_names
-        }
+        new_moments = {}
+        for name in moment_names:
+            idx = tuple(0 if ch == 'x' else 1 for ch in name)
+            if is_batched:
+                new_moments[name] = T_rot[(...,) + idx] * unit
+            else:
+                new_moments[name] = T_rot[idx] * unit
         return type(self)(**new_moments, frame=frame, field=self.field, rtp=self.rtp)
 
     @property

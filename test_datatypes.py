@@ -992,3 +992,203 @@ class TestMomentsRotation:
     def test_rotation_preserves_rtp(self):
         m = self._m2(frame='ocs', rtp=RTP)
         assert m.ccs.rtp is RTP
+
+
+# ===================================================================
+# Spots.compute_moments
+# ===================================================================
+
+
+def _make_spots_single(n_ray: int = 200, rtp: Angle = RTP) -> Spots:
+    """Single field-point spot in CCS frame."""
+    rng = np.random.default_rng(7)
+    dx = rng.normal(size=n_ray) * u.micron
+    dy = rng.normal(0.5, 1.5, size=n_ray) * u.micron
+    vig = np.zeros(n_ray, dtype=bool)
+    field = FieldCoords(x=0.5 * u.deg, y=-0.3 * u.deg, frame='ocs', rtp=rtp)
+    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame='ccs', rtp=rtp)
+
+
+def _make_spots_batched(n_field: int = 4, n_ray: int = 200, rtp: Angle = RTP) -> Spots:
+    """Batched (n_field, n_ray) spots in CCS frame."""
+    rng = np.random.default_rng(13)
+    dx = rng.normal(size=(n_field, n_ray)) * u.micron
+    dy = rng.normal(0.5, 1.5, size=(n_field, n_ray)) * u.micron
+    vig = np.zeros((n_field, n_ray), dtype=bool)
+    field = FieldCoords(
+        x=rng.uniform(-1, 1, n_field) * u.deg,
+        y=rng.uniform(-1, 1, n_field) * u.deg,
+        frame='ocs', rtp=rtp,
+    )
+    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame='ccs', rtp=rtp)
+
+
+class TestSpotsComputeMoments:
+    # ------------------------------------------------------------------
+    # Basic: correct type, frame, field, rtp
+    # ------------------------------------------------------------------
+    def test_returns_moments_instance(self):
+        sp = _make_spots_single()
+        m = sp.compute_moments(order=2)
+        assert isinstance(m, Moments)
+
+    def test_returns_moments2(self):
+        sp = _make_spots_single()
+        assert isinstance(sp.compute_moments(order=2), Moments[2])
+
+    def test_returns_moments3(self):
+        sp = _make_spots_single()
+        assert isinstance(sp.compute_moments(order=3), Moments[3])
+
+    def test_returns_moments4(self):
+        sp = _make_spots_single()
+        assert isinstance(sp.compute_moments(order=4), Moments[4])
+
+    def test_frame_propagated(self):
+        sp = _make_spots_single()
+        assert sp.compute_moments(order=2).frame == sp.frame
+
+    def test_rtp_propagated(self):
+        sp = _make_spots_single()
+        assert sp.compute_moments(order=2).rtp is sp.rtp
+
+    def test_field_propagated(self):
+        sp = _make_spots_single()
+        assert sp.compute_moments(order=2).field is sp.field
+
+    def test_order_too_low_raises(self):
+        sp = _make_spots_single()
+        with pytest.raises(ValueError):
+            sp.compute_moments(order=0)
+
+    def test_units_are_micron_power_order(self):
+        sp = _make_spots_single()
+        for order in (2, 3, 4):
+            m = sp.compute_moments(order=order)
+            names = [
+                ''.join(p)
+                for p in itertools.combinations_with_replacement('xy', order)
+            ]
+            for name in names:
+                assert getattr(m, name).unit == u.micron**order
+
+    def test_vignetted_rays_excluded(self):
+        """Moments with half the rays vignetted differ from using all rays."""
+        rng = np.random.default_rng(42)
+        n_ray = 100
+        dx = rng.normal(size=n_ray) * u.micron
+        dy = rng.normal(size=n_ray) * u.micron
+        vig_none = np.zeros(n_ray, dtype=bool)
+        vig_half = np.zeros(n_ray, dtype=bool)
+        vig_half[:50] = True
+        field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg)
+        sp_full = Spots(dx=dx, dy=dy, vignetted=vig_none, field=field)
+        sp_half = Spots(dx=dx, dy=dy, vignetted=vig_half, field=field)
+        m_full = sp_full.compute_moments(order=2)
+        m_half = sp_half.compute_moments(order=2)
+        assert not np.isclose(m_full.xx.value, m_half.xx.value)
+
+    # ------------------------------------------------------------------
+    # Batched (n_field, n_ray) spots
+    # ------------------------------------------------------------------
+    def test_batched_moment_fields_are_arrays(self):
+        sp = _make_spots_batched(n_field=4)
+        m = sp.compute_moments(order=2)
+        assert m.xx.shape == (4,)
+        assert m.yy.shape == (4,)
+        assert m.xy.shape == (4,)
+
+    def test_batched_agrees_with_single_per_field(self):
+        """Batched compute_moments matches looping over single field-point spots."""
+        sp = _make_spots_batched(n_field=3, n_ray=300)
+        m_batched = sp.compute_moments(order=2)
+        for i in range(3):
+            m_single = sp[i].compute_moments(order=2)
+            for name in ('xx', 'xy', 'yy'):
+                np.testing.assert_allclose(
+                    getattr(m_batched, name)[i].value,
+                    getattr(m_single, name).value,
+                    rtol=1e-12,
+                    err_msg=f"batched vs single mismatch for {name} at field {i}",
+                )
+
+    def test_batched_vignetted_excluded(self):
+        """Per-field vignetting is correctly handled in batched mode."""
+        rng = np.random.default_rng(99)
+        n_field, n_ray = 3, 100
+        dx = rng.normal(size=(n_field, n_ray)) * u.micron
+        dy = rng.normal(size=(n_field, n_ray)) * u.micron
+        vig = np.zeros((n_field, n_ray), dtype=bool)
+        # Vignette half the rays only for field point 1
+        vig[1, :50] = True
+        field = FieldCoords(
+            x=np.zeros(n_field) * u.deg,
+            y=np.zeros(n_field) * u.deg,
+        )
+        sp_vig = Spots(dx=dx, dy=dy, vignetted=vig, field=field)
+        sp_none = Spots(dx=dx, dy=dy, vignetted=np.zeros_like(vig), field=field)
+        m_vig = sp_vig.compute_moments(order=2)
+        m_none = sp_none.compute_moments(order=2)
+        # Field points 0 and 2 are unaffected
+        np.testing.assert_allclose(m_vig.xx[0].value, m_none.xx[0].value)
+        np.testing.assert_allclose(m_vig.xx[2].value, m_none.xx[2].value)
+        # Field point 1 should differ
+        assert not np.isclose(m_vig.xx[1].value, m_none.xx[1].value)
+
+    # ------------------------------------------------------------------
+    # Key consistency test: compute in CCS rotate to OCS  ==
+    #                       rotate spots to OCS then compute
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize('order', [2, 3, 4, 5])
+    def test_moments_rotate_consistent_with_spots_rotate_single(self, order):
+        """Single field point: moments_ccs.ocs == spots_ocs.compute_moments."""
+        sp_ccs = _make_spots_single(n_ray=500)
+        assert sp_ccs.frame == 'ccs'
+
+        m_via_rotate = sp_ccs.compute_moments(order=order).ocs
+        m_via_spots = sp_ccs.ocs.compute_moments(order=order)
+
+        assert m_via_rotate.frame == 'ocs'
+        assert m_via_spots.frame == 'ocs'
+
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', order)
+        ]
+        for name in moment_names:
+            np.testing.assert_allclose(
+                getattr(m_via_rotate, name).value,
+                getattr(m_via_spots, name).value,
+                rtol=1e-10,
+                err_msg=(
+                    f"order={order}, moment {name}: "
+                    "moments_ccs.ocs != spots_ocs.compute_moments"
+                ),
+            )
+
+    @pytest.mark.parametrize('order', [2, 3, 4, 5])
+    def test_moments_rotate_consistent_with_spots_rotate_batched(self, order):
+        """Batched field points: moments_ccs.ocs == spots_ocs.compute_moments."""
+        sp_ccs = _make_spots_batched(n_field=4, n_ray=500)
+        assert sp_ccs.frame == 'ccs'
+
+        m_via_rotate = sp_ccs.compute_moments(order=order).ocs
+        m_via_spots = sp_ccs.ocs.compute_moments(order=order)
+
+        assert m_via_rotate.frame == 'ocs'
+        assert m_via_spots.frame == 'ocs'
+
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', order)
+        ]
+        for name in moment_names:
+            np.testing.assert_allclose(
+                getattr(m_via_rotate, name).value,
+                getattr(m_via_spots, name).value,
+                rtol=1e-10,
+                err_msg=(
+                    f"order={order}, moment {name}: "
+                    "batched moments_ccs.ocs != spots_ocs.compute_moments"
+                ),
+            )
