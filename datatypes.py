@@ -711,6 +711,7 @@ class Moments:
 
     _cache: dict = {}
     _specialized: dict = {}
+    _moment_order: int | None = None  # overridden on concrete classes
 
     @classmethod
     def specialize(cls, order: int):
@@ -741,8 +742,66 @@ class Moments:
                 moment_fields + meta_fields,
                 bases=(cls,),
                 frozen=True,
+                namespace={'_moment_order': order},
             )
         return cls._cache[order]
+
+    def _require(self, name: str):
+        """Return the instance attribute or raise if not set."""
+        val = getattr(self, name)
+        if val is None:
+            raise ValueError(
+                f"{name} must be set on the Moments to use this property"
+            )
+        return val
+
+    def _rot(self, angle: Angle, frame: str):
+        """Return a new Moments with all moment components rotated by *angle*."""
+        c = float(np.cos(angle.rad))
+        s = float(np.sin(angle.rad))
+        R = np.array([[c, s], [-s, c]])
+        order = self._moment_order
+
+        # Build full (non-symmetric) tensor from symmetric named moments
+        T = np.zeros([2] * order)
+        for idx_tuple in itertools.product([0, 1], repeat=order):
+            canonical = tuple(sorted(idx_tuple))
+            name = ''.join('xy'[i] for i in canonical)
+            T[idx_tuple] = getattr(self, name).value
+
+        # Apply rotation: contract R along each index axis in turn
+        T_rot = T.copy()
+        for axis in range(order):
+            T_rot = np.tensordot(R, T_rot, axes=([1], [axis]))
+            T_rot = np.moveaxis(T_rot, 0, axis)
+
+        # Read back symmetric components, restoring units
+        unit = getattr(self, 'x' * order).unit  # e.g. self.xx.unit for order 2
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', order)
+        ]
+        new_moments = {
+            name: T_rot[tuple(0 if ch == 'x' else 1 for ch in name)] * unit
+            for name in moment_names
+        }
+        return type(self)(**new_moments, frame=frame, field=self.field, rtp=self.rtp)
+
+    @property
+    def ocs(self):
+        """These moments in the OCS frame."""
+        if self.frame == 'ocs':
+            return self
+        rtp = self._require('rtp')
+        return self._rot(-rtp, 'ocs')
+
+    @property
+    def ccs(self):
+        """These moments in the CCS frame."""
+        if self.frame == 'ccs':
+            return self
+        rtp = self._require('rtp')
+        return self._rot(rtp, 'ccs')
 
 
 @Moments.specialize(2)

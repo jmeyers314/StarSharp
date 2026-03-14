@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 import astropy.units as u
 import galsim
 import numpy as np
@@ -828,3 +830,165 @@ class TestMomentsIsinstance:
             xxyy=0.5 * u.mm**4, xyyy=0.0 * u.mm**4, yyyy=1.0 * u.mm**4,
         )
         assert isinstance(m, Moments)
+
+
+class TestMomentsRotation:
+    """Tests for the generic .ocs / .ccs frame rotation on Moments."""
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _m2(frame='ocs', rtp=None):
+        return Moments2(
+            xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2,
+            frame=frame, rtp=rtp,
+        )
+
+    @staticmethod
+    def _m3(frame='ocs', rtp=None):
+        return Moments3(
+            xxx=1.0 * u.mm**3, xxy=2.0 * u.mm**3,
+            xyy=3.0 * u.mm**3, yyy=4.0 * u.mm**3,
+            frame=frame, rtp=rtp,
+        )
+
+    @staticmethod
+    def _m4(frame='ocs', rtp=None):
+        return Moments4(
+            xxxx=1.0 * u.mm**4, xxxy=0.5 * u.mm**4, xxyy=0.25 * u.mm**4,
+            xyyy=0.5 * u.mm**4, yyyy=1.0 * u.mm**4,
+            frame=frame, rtp=rtp,
+        )
+
+    # ------------------------------------------------------------------
+    # No-op when already in requested frame
+    # ------------------------------------------------------------------
+    def test_ocs_noop(self):
+        m = self._m2(frame='ocs', rtp=RTP)
+        assert m.ocs is m
+
+    def test_ccs_noop(self):
+        m = self._m2(frame='ccs', rtp=RTP)
+        assert m.ccs is m
+
+    # ------------------------------------------------------------------
+    # Raises without rtp
+    # ------------------------------------------------------------------
+    def test_ccs_without_rtp_raises(self):
+        m = self._m2(frame='ocs', rtp=None)
+        with pytest.raises(ValueError, match='rtp'):
+            m.ccs
+
+    def test_ocs_without_rtp_raises(self):
+        m = self._m2(frame='ccs', rtp=None)
+        with pytest.raises(ValueError, match='rtp'):
+            m.ocs
+
+    # ------------------------------------------------------------------
+    # Zero rotation is identity
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize('make', ['_m2', '_m3', '_m4'])
+    def test_zero_rotation_identity(self, make):
+        m = getattr(self, make)(frame='ocs', rtp=Angle(0, unit=u.rad))
+        ccs = m.ccs
+        for name in ccs._moment_order * ['x']:  # just to get field list
+            pass
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', m._moment_order)
+        ]
+        for name in moment_names:
+            np.testing.assert_allclose(
+                getattr(ccs, name).value,
+                getattr(m, name).value,
+                atol=1e-12,
+                err_msg=f"{name} changed under zero rotation",
+            )
+
+    # ------------------------------------------------------------------
+    # Roundtrip ocs -> ccs -> ocs
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize('make', ['_m2', '_m3', '_m4'])
+    def test_roundtrip_ocs_ccs_ocs(self, make):
+        m = getattr(self, make)(frame='ocs', rtp=RTP)
+        rt = m.ccs.ocs
+        assert rt.frame == 'ocs'
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', m._moment_order)
+        ]
+        for name in moment_names:
+            np.testing.assert_allclose(
+                getattr(rt, name).value,
+                getattr(m, name).value,
+                atol=1e-12,
+                err_msg=f"{name} not recovered after ocs->ccs->ocs",
+            )
+
+    @pytest.mark.parametrize('make', ['_m2', '_m3', '_m4'])
+    def test_roundtrip_ccs_ocs_ccs(self, make):
+        m = getattr(self, make)(frame='ccs', rtp=RTP)
+        rt = m.ocs.ccs
+        assert rt.frame == 'ccs'
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', m._moment_order)
+        ]
+        for name in moment_names:
+            np.testing.assert_allclose(
+                getattr(rt, name).value,
+                getattr(m, name).value,
+                atol=1e-12,
+                err_msg=f"{name} not recovered after ccs->ocs->ccs",
+            )
+
+    # ------------------------------------------------------------------
+    # Spin-0 invariant: trace of 2nd moments is preserved
+    # ------------------------------------------------------------------
+    def test_spin0_invariant_moments2(self):
+        """xx + yy is invariant under rotation."""
+        m = self._m2(frame='ocs', rtp=RTP)
+        ccs = m.ccs
+        trace_before = (m.xx + m.yy).value
+        trace_after = (ccs.xx + ccs.yy).value
+        np.testing.assert_allclose(trace_after, trace_before, atol=1e-12)
+
+    def test_spin0_invariant_moments4(self):
+        """xxxx + 2*xxyy + yyyy is invariant under rotation."""
+        m = self._m4(frame='ocs', rtp=RTP)
+        ccs = m.ccs
+        inv_before = (m.xxxx + 2 * m.xxyy + m.yyyy).value
+        inv_after = (ccs.xxxx + 2 * ccs.xxyy + ccs.yyyy).value
+        np.testing.assert_allclose(inv_after, inv_before, atol=1e-12)
+
+    # ------------------------------------------------------------------
+    # 90-degree rotation: known analytic result for 2nd moments
+    # ------------------------------------------------------------------
+    def test_90deg_rotation_moments2(self):
+        """Under 90-deg CCS rotation: xx' = yy, yy' = xx, xy' = -xy."""
+        rtp = Angle(np.pi / 2, unit=u.rad)
+        m = Moments2(
+            xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2,
+            frame='ocs', rtp=rtp,
+        )
+        ccs = m.ccs
+        np.testing.assert_allclose(ccs.xx.value, m.yy.value, atol=1e-12)
+        np.testing.assert_allclose(ccs.yy.value, m.xx.value, atol=1e-12)
+        np.testing.assert_allclose(ccs.xy.value, -m.xy.value, atol=1e-12)
+
+    # ------------------------------------------------------------------
+    # type and frame are preserved correctly
+    # ------------------------------------------------------------------
+    def test_rotation_returns_same_type(self):
+        m = self._m2(frame='ocs', rtp=RTP)
+        assert type(m.ccs) is type(m)
+
+    def test_rotation_sets_frame(self):
+        m = self._m2(frame='ocs', rtp=RTP)
+        assert m.ccs.frame == 'ccs'
+        assert m.ccs.ocs.frame == 'ocs'
+
+    def test_rotation_preserves_rtp(self):
+        m = self._m2(frame='ocs', rtp=RTP)
+        assert m.ccs.rtp is RTP
