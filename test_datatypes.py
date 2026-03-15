@@ -17,16 +17,30 @@ from datatypes import FieldCoords, Moments, Moments2, Moments3, Moments4, Spots,
 # ---------------------------------------------------------------------------
 
 
+def _make_wcs(
+    rtp: Angle | None = None,
+) -> galsim.CelestialWCS:
+    if rtp is None:
+        rtp = Angle(0, unit=u.deg)
+    c = np.cos(rtp)
+    s = np.sin(rtp)
+    scale = np.deg2rad(20/3600)  # 20 arcsec/mm
+    rot = np.array([[c, -s], [s, c]]) * scale
+    return galsim.AffineTransform(
+        rot[0, 0], rot[0, 1], rot[1, 0], rot[1, 1], galsim.PositionD(0.0, 0.0)
+    )
+
 def _make_field(
     n: int = 3,
     frame: str = "ocs",
     rtp: Angle | None = None,
     unit: u.Unit = u.deg,
+    wcs: galsim.BaseWCS | None = None,
 ) -> FieldCoords:
     rng = np.random.default_rng(42)
     x = rng.uniform(-1.5, 1.5, n) * unit
     y = rng.uniform(-1.5, 1.5, n) * unit
-    return FieldCoords(x=x, y=y, frame=frame, rtp=rtp)
+    return FieldCoords(x=x, y=y, frame=frame, rtp=rtp, wcs=wcs)
 
 
 RTP = Angle(0.25, unit=u.rad)
@@ -80,6 +94,28 @@ class TestFieldCoordsSpace:
     def test_focal_plane_space(self):
         fc = FieldCoords(x=1.0 * u.mm, y=2.0 * u.mm)
         assert fc.space == "focal_plane"
+
+    def test_roundtrip_angle_focal_plane(self):
+        wcs = _make_wcs(rtp=RTP)
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, wcs=wcs, rtp=RTP)
+        fp = fc.focal_plane.angle
+        np.testing.assert_allclose(
+            fp.x.to_value(u.deg), fc.x.to_value(u.deg), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            fp.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-12
+        )
+
+    def test_roundtrip_focal_plane_angle(self):
+        wcs = _make_wcs(rtp=RTP)
+        fc = FieldCoords(x=1.0 * u.mm, y=2.0 * u.mm, wcs=wcs, rtp=RTP)
+        ang = fc.angle.focal_plane
+        np.testing.assert_allclose(
+            ang.x.to_value(u.mm), fc.x.to_value(u.mm), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            ang.y.to_value(u.mm), fc.y.to_value(u.mm), atol=1e-12
+        )
 
 
 class TestFieldCoordsFrameRotation:
@@ -181,12 +217,14 @@ def _make_spots(
     n_ray: int = 50,
     frame: str = "ccs",
     rtp: Angle | None = None,
+    unit: u.Unit = u.um,
+    wcs: galsim.BaseWCS | None = None,
 ) -> Spots:
     rng = np.random.default_rng(12)
-    dx = rng.normal(size=(n_field, n_ray)) * u.um
-    dy = rng.normal(size=(n_field, n_ray)) * u.um
+    dx = rng.normal(size=(n_field, n_ray)) * unit
+    dy = rng.normal(size=(n_field, n_ray)) * unit
     vig = np.zeros((n_field, n_ray), dtype=bool)
-    field = _make_field(n_field, frame="ocs", rtp=rtp)
+    field = _make_field(n_field, frame="ocs", rtp=rtp, wcs=wcs)
     return Spots(
         dx=dx,
         dy=dy,
@@ -195,6 +233,7 @@ def _make_spots(
         wavelength=622.0 * u.nm,
         frame=frame,
         rtp=rtp,
+        wcs=wcs,
     )
 
 
@@ -283,6 +322,38 @@ class TestSpotsFrameRotation:
         rot_norm = np.sqrt(rot.dx**2 + rot.dy**2)
         np.testing.assert_allclose(
             rot_norm.to_value(u.um), orig_norm.to_value(u.um), atol=1e-12
+        )
+
+
+class TestSpotsSpace:
+    def test_space_angle(self):
+        sp = _make_spots(frame="ocs", rtp=RTP, unit=u.arcsec)
+        assert sp.space == "angle"
+
+    def test_space_focal_plane(self):
+        sp = _make_spots(frame="ccs", rtp=RTP, unit=u.mm)
+        assert sp.space == "focal_plane"
+
+    def test_roundtrip_focal_plane_angle(self):
+        wcs = _make_wcs(rtp=RTP)
+        sp = _make_spots(frame="ccs", rtp=RTP, unit=u.mm, wcs=wcs)
+        rt = sp.angle.focal_plane
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.mm), sp.dx.to_value(u.mm), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.mm), sp.dy.to_value(u.mm), atol=1e-12
+        )
+
+    def test_roundtrip_angle_focal_plane(self):
+        wcs = _make_wcs(rtp=RTP)
+        sp = _make_spots(frame="ocs", rtp=RTP, unit=u.arcsec, wcs=wcs)
+        rt = sp.focal_plane.angle
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-12
         )
 
 

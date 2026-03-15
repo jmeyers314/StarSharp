@@ -11,7 +11,8 @@ import galsim
 import numpy as np
 from astropy.coordinates import Angle
 from astropy.units import Quantity
-from galsim.fitswcs import GSFitsWCS
+from galsim.wcs import BaseWCS, CelestialWCS
+from galsim.fitswcs import FittedSIPWCS
 from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
 from numpy.typing import NDArray
 
@@ -33,7 +34,7 @@ class FieldCoords:
         (camera).
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
-    wcs : GSFitsWCS or None
+    wcs : BaseWCS or None
         WCS for converting between field-angle and focal-plane space.  Required for
         space conversions.  WCS assumes field angles are in radians and focal-plane
         coordinates are in mm.
@@ -46,7 +47,7 @@ class FieldCoords:
     y: Quantity
     frame: str = "ocs"
     rtp: Optional[Angle] = None
-    wcs: Optional[GSFitsWCS] = None
+    wcs: Optional[BaseWCS] = None
     camera: Optional[Camera] = None
 
     def __post_init__(self):
@@ -86,7 +87,7 @@ class FieldCoords:
         wavelength: Quantity,
         rtp: Optional[Angle] = None,
         **kwargs,
-    ):
+    ) -> FieldCoords:
         if rtp is None:
             rtp = Angle("0 deg")
         rotated = telescope.withLocallyRotatedOptic("LSSTCamera", batoid.RotZ(rtp.rad))
@@ -145,19 +146,18 @@ class FieldCoords:
 
     @property
     def focal_plane(self) -> FieldCoords:
-        """This coordinate in focal-plane space (CCS frame)."""
+        """This coordinate in focal-plane space."""
         if self.space == "focal_plane":
             return self
         wcs = self._require("wcs")
         field = self.ocs
-        fx, fy = wcs.toImage(
-            field.x.to_value(u.radian),
-            field.y.to_value(u.radian),
-            units="radians",
-        )
+        args = [field.x.to_value(u.radian), field.y.to_value(u.radian)]
+        if isinstance(wcs, CelestialWCS):
+            args.append("radians")
+        fpx, fpy = wcs.toImage(*args)
         fp_ccs = FieldCoords(
-            x=fx << u.mm,
-            y=fy << u.mm,
+            x=fpx << u.mm,
+            y=fpy << u.mm,
             frame="ccs",
             rtp=self.rtp,
             wcs=self.wcs,
@@ -171,12 +171,11 @@ class FieldCoords:
         if self.space == "angle":
             return self
         wcs = self._require("wcs")
-        fp = self.focal_plane
-        fx, fy = wcs.toWorld(
-            fp.x.to_value(u.mm),
-            fp.y.to_value(u.mm),
-            units="radians",
-        )
+        fp = self.ccs
+        args = [fp.x.to_value(u.mm), fp.y.to_value(u.mm)]
+        if isinstance(wcs, CelestialWCS):
+            args.append("radians")
+        fx, fy = wcs.toWorld(*args)
         field_ocs = FieldCoords(
             x=fx << u.radian,
             y=fy << u.radian,
@@ -257,6 +256,7 @@ class Spots:
     wavelength: Quantity | None = None
     frame: str = "ccs"
     rtp: Optional[Angle] = None
+    wcs: Optional[BaseWCS] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dx", np.atleast_1d(self.dx))
@@ -288,6 +288,7 @@ class Spots:
             wavelength=self.wavelength,
             frame=self.frame,
             rtp=self.rtp,
+            wcs=self.wcs,
         )
 
     def _require(self, name: str):
@@ -296,6 +297,13 @@ class Spots:
         if val is None:
             raise ValueError(f"{name} must be set on the Spots to use this property")
         return val
+
+    @property
+    def space(self) -> str:
+        """Inferred coordinate space: ``'angle'`` or ``'focal_plane'``."""
+        if self.dx.unit.physical_type == "angle":
+            return "angle"
+        return "focal_plane"
 
     def _rot(self, angle: Angle, frame: str) -> Spots:
         """Return a new Spots with dx/dy rotated by *angle*."""
@@ -309,6 +317,7 @@ class Spots:
             wavelength=self.wavelength,
             frame=frame,
             rtp=self.rtp,
+            wcs=self.wcs,
         )
 
     @property
@@ -326,6 +335,61 @@ class Spots:
             return self
         rtp = self._require("rtp")
         return self._rot(rtp, "ccs")
+
+    @property
+    def focal_plane(self) -> Spots:
+        """This spot in focal-plane space."""
+        if self.space == "focal_plane":
+            return self
+        wcs = self._require("wcs")
+        sfx = self.ocs.dx.to_value(u.radian) + self.field.angle.ocs.x.to_value(u.radian)[:, np.newaxis]
+        sfy = self.ocs.dy.to_value(u.radian) + self.field.angle.ocs.y.to_value(u.radian)[:, np.newaxis]
+        args = [sfx, sfy]
+        if isinstance(wcs, CelestialWCS):
+            args.append("radians")
+        sfpx, sfpy = wcs.toImage(*args)
+        sfpx -= self.field.focal_plane.ccs.x.to_value(u.mm)[:, np.newaxis]
+        sfpy -= self.field.focal_plane.ccs.y.to_value(u.mm)[:, np.newaxis]
+
+        fp_ccs = Spots(
+            dx=sfpx << u.mm,
+            dy=sfpy << u.mm,
+            vignetted=self.vignetted,
+            field=self.field.focal_plane,
+            wavelength=self.wavelength,
+            frame="ccs",
+            rtp=self.rtp,
+            wcs=self.wcs,
+        )
+        return getattr(fp_ccs, self.frame)
+
+    @property
+    def angle(self) -> Spots:
+        """This spot in field-angle space (OCS frame)."""
+        if self.space == "angle":
+            return self
+        wcs = self._require("wcs")
+        sfpx = self.ccs.dx.to_value(u.mm) + self.field.focal_plane.ccs.x.to_value(u.mm)[:, np.newaxis]
+        sfpy = self.ccs.dy.to_value(u.mm) + self.field.focal_plane.ccs.y.to_value(u.mm)[:, np.newaxis]
+        args = [sfpx, sfpy]
+        if isinstance(wcs, CelestialWCS):
+            args.append("radians")
+
+        sfx, sfy = wcs.toWorld(*args)
+        sfx -= self.field.angle.ocs.x.to_value(u.radian)[:, np.newaxis]
+        sfy -= self.field.angle.ocs.y.to_value(u.radian)[:, np.newaxis]
+
+        field_ocs = Spots(
+            dx=sfx << u.radian,
+            dy=sfy << u.radian,
+            vignetted=self.vignetted,
+            field=self.field.angle.ocs,
+            wavelength=self.wavelength,
+            frame="ocs",
+            rtp=self.rtp,
+            wcs=self.wcs,
+        )
+        return getattr(field_ocs, self.frame)
 
     def __repr__(self) -> str:
         return f"Spots(frame={self.frame!r})"
