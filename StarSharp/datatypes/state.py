@@ -6,11 +6,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-VALID_BASES = ("x", "f", "v")
 
 
 @dataclass(frozen=True)
 class State:
+    VALID_BASES = ("x", "f", "v")
+
     """Alignment state in one of three bases.
 
     Analogous to `FieldCoords` with its ``frame`` attribute:
@@ -61,8 +62,8 @@ class State:
 
     def __post_init__(self):
         object.__setattr__(self, "value", np.asarray(self.value, dtype=float))
-        if self.basis not in VALID_BASES:
-            raise ValueError(f"basis must be one of {VALID_BASES}, got {self.basis!r}")
+        if self.basis not in self.VALID_BASES:
+            raise ValueError(f"basis must be one of {self.VALID_BASES}, got {self.basis!r}")
         if self.basis == "f" and self.n_dof is None:
             object.__setattr__(self, "n_dof", len(self.value))
         if self.basis == "v" and self.Vh is None:

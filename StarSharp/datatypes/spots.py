@@ -16,6 +16,7 @@ from .field_coords import FieldCoords
 
 @dataclass(frozen=True)
 class Spots:
+    VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
     """Spot diagrams: ray intersection positions on the focal plane.
 
     May represent one or many field points.  When batched,
@@ -51,6 +52,11 @@ class Spots:
         object.__setattr__(self, "dx", np.atleast_1d(self.dx))
         object.__setattr__(self, "dy", np.atleast_1d(self.dy))
         object.__setattr__(self, "vignetted", np.atleast_1d(self.vignetted))
+        # Coerce frame to lower case, but preserve original name (including 'edcs')
+        frame = self.frame.lower()
+        object.__setattr__(self, "frame", frame)
+        if frame not in self.VALID_FRAMES:
+            raise ValueError(f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}")
         if (
             self.rtp is not None
             and self.field.rtp is not None

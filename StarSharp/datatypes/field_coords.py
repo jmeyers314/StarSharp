@@ -14,7 +14,6 @@ import galsim
 import astropy.units as u
 
 
-VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
 
 
 @dataclass(frozen=True)
@@ -41,6 +40,9 @@ class FieldCoords:
         ``detnum`` property.
     """
 
+
+    VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
+
     x: Quantity
     y: Quantity
     frame: str = "ocs"
@@ -56,8 +58,8 @@ class FieldCoords:
         # Coerce frame to lower case, but preserve original name (including 'edcs')
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
-        if frame not in VALID_FRAMES:
-            raise ValueError(f"frame must be one of {VALID_FRAMES}, got {self.frame!r}")
+        if frame not in self.VALID_FRAMES:
+            raise ValueError(f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}")
         if not (self.x.unit.physical_type == self.y.unit.physical_type):
             raise ValueError(
                 f"x and y must have compatible units, "
