@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "StarSharp"
+version = "0.1.0"
+description = "Wavefront sensing and alignment tools for LSST/Rubin Observatory"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "astropy",
+    "galsim",
+    "batoid",
+    # lsst-afw (lsst.afw.cameraGeom) is required but must be installed
+    # via the LSST Science Pipelines stack (conda/eups), not pip.
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["StarSharp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

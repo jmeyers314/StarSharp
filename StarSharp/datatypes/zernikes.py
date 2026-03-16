@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+import astropy.units as u
+import galsim
+import numpy as np
+from astropy.coordinates import Angle
+from astropy.units import Quantity
+from numpy.typing import NDArray
+
+from .field_coords import FieldCoords
+
+
+@dataclass(frozen=True)
+class Zernikes:
+    """Zernike coefficients at one or many field points.
+
+    When batched, ``coefs`` has shape ``(..., jmax + 1)``.
+
+    Parameters
+    ----------
+    coefs : Quantity
+        Zernike coefficient array.  The last axis indexes Noll
+        index *j* (0 … jmax).  Leading axes are batch dimensions.
+    R_outer : float
+        Outer radius of the annular pupil.
+    R_inner : float
+        Inner radius of the annular pupil.
+    jmax : int or None
+        Maximum Noll index.  Inferred from ``coefs`` if *None*.
+    rtp : Angle or None
+        Rotation angle from OCS to CCS frame.  Required for frame conversions.
+    """
+
+    coefs: Quantity
+    field: FieldCoords
+    R_outer: Quantity = None
+    R_inner: Quantity = None
+    wavelength: Quantity | None = None
+    jmax: int | None = None
+    frame: str = "ocs"
+    rtp: Optional[Angle] = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "coefs", np.atleast_1d(self.coefs))
+        if self.jmax is None:
+            object.__setattr__(self, "jmax", self.coefs.shape[-1] - 1)
+        if (
+            self.rtp is not None
+            and self.field.rtp is not None
+            and not np.allclose(
+                self.rtp.rad, self.field.rtp.rad  # type: ignore[union-attr]
+            )
+        ):
+            raise ValueError(
+                f"Zernikes.rtp ({self.rtp}) is inconsistent with "
+                f"field.rtp ({self.field.rtp})"
+            )
+
+    @property
+    def eps(self) -> float:
+        """Obscuration ratio R_inner / R_outer."""
+        return (self.R_inner / self.R_outer).value
+
+    def __len__(self) -> int:
+        if self.coefs.ndim == 1:
+            return 1
+        return self.coefs.shape[0]
+
+    def __getitem__(self, idx: int | slice) -> Zernikes:
+        return Zernikes(
+            coefs=self.coefs[idx],
+            field=self.field[idx],
+            R_outer=self.R_outer,
+            R_inner=self.R_inner,
+            wavelength=self.wavelength,
+            jmax=self.jmax,
+            frame=self.frame,
+            rtp=self.rtp,
+        )
+
+    def _require(self, name: str):
+        """Return the instance attribute or raise if not set."""
+        val = getattr(self, name)
+        if val is None:
+            raise ValueError(f"{name} must be set on the Zernikes to use this property")
+        return val
+
+    def _rot(self, angle: Angle, frame: str) -> Zernikes:
+        """Return a new Zernikes with the coefficients rotated by *angle*."""
+        rot = galsim.zernike.zernikeRotMatrix(self.jmax, angle.radian)
+        coefs_rot = self.coefs @ rot
+        return Zernikes(
+            coefs=coefs_rot,
+            field=self.field,
+            R_outer=self.R_outer,
+            R_inner=self.R_inner,
+            wavelength=self.wavelength,
+            jmax=self.jmax,
+            frame=frame,
+            rtp=self.rtp,
+        )
+
+    @property
+    def ocs(self) -> Zernikes:
+        """This Zernikes in the OCS frame."""
+        if self.frame == "ocs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(-rtp, "ocs")
+
+    @property
+    def ccs(self) -> Zernikes:
+        """This Zernikes in the CCS frame."""
+        if self.frame == "ccs":
+            return self
+        rtp = self._require("rtp")
+        return self._rot(rtp, "ccs")
+
+    def to_galsim(
+        self,
+        idx: int | None = None,
+        unit: u.Unit = u.um,
+        radius_unit: u.Unit = u.m,
+    ) -> galsim.zernike.Zernike:
+        """Return a `galsim.zernike.Zernike` for one set of coefficients.
+
+        Parameters
+        ----------
+        idx : int or None
+            Index into the batch dimension.  Required when
+            ``coefs`` has more than one dimension; ignored for a
+            single (1-D) coefficient vector.
+        unit : astropy.units.Unit
+            Unit for the output coefficients (default: micron).
+        """
+        c = self.coefs if self.coefs.ndim == 1 else self.coefs[idx]
+        if c.ndim != 1:
+            raise TypeError("to_galsim() requires a single coefficient vector")
+        return galsim.zernike.Zernike(
+            c.to(unit).value,
+            R_outer=self.R_outer.to_value(radius_unit),
+            R_inner=self.R_inner.to_value(radius_unit),
+        )
+
+    def __repr__(self) -> str:
+        return f"Zernikes({self.coefs!r}, jmax={self.jmax}, frame={self.frame!r})"

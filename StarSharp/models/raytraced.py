@@ -5,9 +5,9 @@ import numpy as np
 from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from tqdm import tqdm
-from typing import List, Optional
+from typing import Optional
 
-from datatypes import FieldCoords, Spots, Zernikes, State
+from ..datatypes import FieldCoords, Spots, Zernikes, State
 
 
 FIELD_OUTER = 1.75
