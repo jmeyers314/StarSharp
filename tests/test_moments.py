@@ -124,6 +124,24 @@ class TestMomentsMetadata:
         )
         assert m.rtp is rtp
 
+    def test_frame_coerced_to_lower(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2, frame="OCS")
+        assert m.frame == "ocs"
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2, frame="CCS")
+        assert m.frame == "ccs"
+
+    def test_frame_coerced_mixed_case(self):
+        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2, frame="oCs")
+        assert m.frame == "ocs"
+
+    def test_frame_coerced_generic_moments(self):
+        m = Moments[3](
+            xxx=0.0 * u.mm**3, xxy=0.0 * u.mm**3,
+            xyy=0.0 * u.mm**3, yyy=0.0 * u.mm**3,
+            frame="OCS",
+        )
+        assert m.frame == "ocs"
+
 
 class TestMomentsIsinstance:
     def test_moments2_isinstance_moments(self):

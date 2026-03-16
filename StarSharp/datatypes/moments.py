@@ -39,6 +39,11 @@ class Moments:
     _specialized: dict = {}
     _moment_order: int | None = None  # overridden on concrete classes
 
+    def __post_init__(self):
+        # Coerce frame to lower case
+        if hasattr(self, 'frame') and isinstance(self.frame, str):
+            object.__setattr__(self, 'frame', self.frame.lower())
+
     @classmethod
     def specialize(cls, order: int):
         """Decorator to register a specialized implementation for an order."""
