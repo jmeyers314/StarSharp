@@ -38,11 +38,14 @@ class Moments:
     _cache: dict = {}
     _specialized: dict = {}
     _moment_order: int | None = None  # overridden on concrete classes
+    VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
 
     def __post_init__(self):
-        # Coerce frame to lower case
+        # Coerce frame to lower case and validate
         if hasattr(self, 'frame') and isinstance(self.frame, str):
             object.__setattr__(self, 'frame', self.frame.lower())
+        if hasattr(self, 'frame') and self.frame not in self.VALID_FRAMES:
+            raise ValueError(f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}")
 
     @classmethod
     def specialize(cls, order: int):
@@ -134,21 +137,63 @@ class Moments:
                 new_moments[name] = T_rot[idx] * unit
         return type(self)(**new_moments, frame=frame, field=self.field, rtp=self.rtp)
 
+    def _swap(self, frame: str):
+        """Return a new Moments with x and y swapped (reflection x↔y)."""
+        order = self._moment_order
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', order)
+        ]
+        new_moments = {}
+        for name in moment_names:
+            # Swap x↔y in the name then re-sort to canonical form
+            canonical_swapped = ''.join(sorted('y' if ch == 'x' else 'x' for ch in name))
+            new_moments[name] = getattr(self, canonical_swapped)
+        return type(self)(**new_moments, frame=frame, field=self.field, rtp=self.rtp)
+
+    def _relabel(self, frame: str):
+        """Return an identical Moments with a different frame label."""
+        order = self._moment_order
+        moment_names = [
+            ''.join(p)
+            for p in itertools.combinations_with_replacement('xy', order)
+        ]
+        return type(self)(**{n: getattr(self, n) for n in moment_names}, frame=frame, field=self.field, rtp=self.rtp)
+
     @property
     def ocs(self):
         """These moments in the OCS frame."""
         if self.frame == 'ocs':
             return self
         rtp = self._require('rtp')
-        return self._rot(-rtp, 'ocs')
+        return self.ccs._rot(-rtp, 'ocs')
 
     @property
     def ccs(self):
-        """These moments in the CCS frame."""
+        """These moments in the CCS frame (always frame='ccs')."""
         if self.frame == 'ccs':
             return self
+        if self.frame == 'edcs':
+            return self._relabel('ccs')
+        if self.frame == 'dvcs':
+            return self._swap('ccs')
+        # ocs
         rtp = self._require('rtp')
         return self._rot(rtp, 'ccs')
+
+    @property
+    def edcs(self):
+        """These moments in the EDCS frame (synonym for CCS, preserves name)."""
+        if self.frame == 'edcs':
+            return self
+        return self.ccs._relabel('edcs')
+
+    @property
+    def dvcs(self):
+        """These moments in the DVCS frame (transpose of EDCS/CCS)."""
+        if self.frame == 'dvcs':
+            return self
+        return self.ccs._swap('dvcs')
 
     def spin(self, n, m):
         """Return the (n, m) spin-decomposed moment component.

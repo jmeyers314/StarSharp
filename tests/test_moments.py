@@ -297,6 +297,110 @@ class TestMomentsRotation:
         assert m.ccs.rtp is RTP
 
 
+class TestMomentsNewFrames:
+    """Tests for edcs and dvcs frames in Moments."""
+
+    @staticmethod
+    def _m2(frame='ccs', rtp=None):
+        return Moments2(
+            xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2,
+            frame=frame, rtp=rtp,
+        )
+
+    def test_edcs_noop_when_already_edcs(self):
+        m = self._m2(frame='edcs', rtp=RTP)
+        assert m.edcs is m
+        assert m.frame == 'edcs'
+
+    def test_dvcs_noop_when_already_dvcs(self):
+        m = self._m2(frame='dvcs', rtp=RTP)
+        assert m.dvcs is m
+        assert m.frame == 'dvcs'
+
+    def test_ccs_from_edcs_relabels(self):
+        m = self._m2(frame='edcs', rtp=RTP)
+        ccs = m.ccs
+        assert ccs.frame == 'ccs'
+        np.testing.assert_allclose(ccs.xx.value, m.xx.value)
+        np.testing.assert_allclose(ccs.xy.value, m.xy.value)
+        np.testing.assert_allclose(ccs.yy.value, m.yy.value)
+
+    def test_edcs_from_ccs_relabels(self):
+        m = self._m2(frame='ccs', rtp=RTP)
+        edcs = m.edcs
+        assert edcs.frame == 'edcs'
+        np.testing.assert_allclose(edcs.xx.value, m.xx.value)
+        np.testing.assert_allclose(edcs.xy.value, m.xy.value)
+        np.testing.assert_allclose(edcs.yy.value, m.yy.value)
+
+    def test_edcs_from_ocs(self):
+        m = self._m2(frame='ocs', rtp=RTP)
+        edcs = m.edcs
+        ccs = m.ccs
+        assert edcs.frame == 'edcs'
+        np.testing.assert_allclose(edcs.xx.value, ccs.xx.value)
+        np.testing.assert_allclose(edcs.xy.value, ccs.xy.value)
+        np.testing.assert_allclose(edcs.yy.value, ccs.yy.value)
+
+    def test_dvcs_from_ccs_swaps_xy(self):
+        m = self._m2(frame='ccs', rtp=RTP)
+        dvcs = m.dvcs
+        assert dvcs.frame == 'dvcs'
+        # dvcs.xx = ccs.yy, dvcs.xy = ccs.xy, dvcs.yy = ccs.xx
+        np.testing.assert_allclose(dvcs.xx.value, m.yy.value)
+        np.testing.assert_allclose(dvcs.xy.value, m.xy.value)
+        np.testing.assert_allclose(dvcs.yy.value, m.xx.value)
+
+    def test_dvcs_from_edcs_swaps_xy(self):
+        m = self._m2(frame='edcs', rtp=RTP)
+        dvcs = m.dvcs
+        assert dvcs.frame == 'dvcs'
+        np.testing.assert_allclose(dvcs.xx.value, m.yy.value)
+        np.testing.assert_allclose(dvcs.xy.value, m.xy.value)
+        np.testing.assert_allclose(dvcs.yy.value, m.xx.value)
+
+    def test_edcs_dvcs_edcs_roundtrip(self):
+        m = self._m2(frame='edcs', rtp=RTP)
+        rt = m.dvcs.edcs
+        assert rt.frame == 'edcs'
+        np.testing.assert_allclose(rt.xx.value, m.xx.value)
+        np.testing.assert_allclose(rt.xy.value, m.xy.value)
+        np.testing.assert_allclose(rt.yy.value, m.yy.value)
+
+    def test_dvcs_edcs_dvcs_roundtrip(self):
+        m = self._m2(frame='dvcs', rtp=RTP)
+        rt = m.edcs.dvcs
+        assert rt.frame == 'dvcs'
+        np.testing.assert_allclose(rt.xx.value, m.xx.value)
+        np.testing.assert_allclose(rt.xy.value, m.xy.value)
+        np.testing.assert_allclose(rt.yy.value, m.yy.value)
+
+    def test_ocs_dvcs_ocs_roundtrip(self):
+        m = self._m2(frame='ocs', rtp=RTP)
+        rt = m.dvcs.ocs
+        assert rt.frame == 'ocs'
+        np.testing.assert_allclose(rt.xx.value, m.xx.value)
+        np.testing.assert_allclose(rt.xy.value, m.xy.value)
+        np.testing.assert_allclose(rt.yy.value, m.yy.value)
+
+    def test_invalid_frame_raises(self):
+        with pytest.raises(ValueError, match="frame must be one of"):
+            self._m2(frame='notaframe')
+
+    def test_dvcs_moments3_swaps_correctly(self):
+        m = Moments3(
+            xxx=1.0 * u.mm**3, xxy=2.0 * u.mm**3,
+            xyy=3.0 * u.mm**3, yyy=4.0 * u.mm**3,
+            frame='ccs', rtp=RTP,
+        )
+        dvcs = m.dvcs
+        # dvcs.xxx = ccs.yyy, dvcs.xxy = ccs.xyy, dvcs.xyy = ccs.xxy, dvcs.yyy = ccs.xxx
+        np.testing.assert_allclose(dvcs.xxx.value, m.yyy.value)
+        np.testing.assert_allclose(dvcs.xxy.value, m.xyy.value)
+        np.testing.assert_allclose(dvcs.xyy.value, m.xxy.value)
+        np.testing.assert_allclose(dvcs.yyy.value, m.xxx.value)
+
+
 class TestMoments2Properties:
     def test_T_value(self):
         m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
