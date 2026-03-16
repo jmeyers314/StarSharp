@@ -14,7 +14,7 @@ class State:
     """Alignment state in one of three bases.
 
     Analogous to `FieldCoords` with its ``frame`` attribute:
-    ``state`` holds the coefficient vector and ``basis`` identifies
+    ``value`` holds the coefficient vector and ``basis`` identifies
     the representation.  Use the ``.x``, ``.f``, and ``.v``
     properties to convert between bases (each returns a new
     ``State``).
@@ -32,7 +32,7 @@ class State:
 
     Parameters
     ----------
-    state : NDArray[np.floating]
+    value : NDArray[np.floating]
         Coefficient vector in the basis given by ``basis``.
     basis : str
         One of ``"x"``, ``"f"``, or ``"v"``.
@@ -41,7 +41,7 @@ class State:
         involving ``"x"`` or ``"v"`` bases.  When constructing
         in ``"f"`` basis with no conversions needed, may be omitted.
     n_dof : int or None
-        Total number of DOFs.  Inferred from ``state`` when
+        Total number of DOFs.  Inferred from ``value`` when
         ``basis="f"``.  Required when constructing in ``"x"`` or
         ``"v"`` basis and converting to ``"f"``.
     Vh : NDArray[np.floating] or None
@@ -52,7 +52,7 @@ class State:
         when ``Vh`` is provided.
     """
 
-    state: NDArray[np.floating]
+    value: NDArray[np.floating]
     basis: str = "x"
     use_dof: NDArray[np.integer] | None = None
     n_dof: int | None = None
@@ -60,11 +60,11 @@ class State:
     nkeep: int | None = None
 
     def __post_init__(self):
-        object.__setattr__(self, "state", np.asarray(self.state, dtype=float))
+        object.__setattr__(self, "value", np.asarray(self.value, dtype=float))
         if self.basis not in VALID_BASES:
             raise ValueError(f"basis must be one of {VALID_BASES}, got {self.basis!r}")
         if self.basis == "f" and self.n_dof is None:
-            object.__setattr__(self, "n_dof", len(self.state))
+            object.__setattr__(self, "n_dof", len(self.value))
         if self.basis == "v" and self.Vh is None:
             raise ValueError(
                 "Vh (and nkeep) must be set when constructing State with basis='v'"
@@ -86,7 +86,7 @@ class State:
         if self.basis == "f":
             use_dof = self._require("use_dof")
             return State(
-                state=self.state[use_dof],
+                value=self.value[use_dof],
                 basis="x",
                 use_dof=self.use_dof,
                 n_dof=self.n_dof,
@@ -97,7 +97,7 @@ class State:
         Vh = self._require("Vh")
         nkeep = self._require("nkeep")
         return State(
-            state=self.state @ Vh[:nkeep],
+            value=self.value @ Vh[:nkeep],
             basis="x",
             use_dof=self.use_dof,
             n_dof=self.n_dof,
@@ -113,10 +113,10 @@ class State:
         xs = self.x  # go through x-basis
         use_dof = self._require("use_dof")
         n_dof = self._require("n_dof")
-        fstate = np.zeros(n_dof, dtype=float)
-        fstate[use_dof] = xs.state
+        fvalue = np.zeros(n_dof, dtype=float)
+        fvalue[use_dof] = xs.value
         return State(
-            state=fstate,
+            value=fvalue,
             basis="f",
             use_dof=self.use_dof,
             n_dof=n_dof,
@@ -133,7 +133,7 @@ class State:
         nkeep = self._require("nkeep")
         xs = self.x  # go through x-basis
         return State(
-            state=xs.state @ Vh[:nkeep].T,
+            value=xs.value @ Vh[:nkeep].T,
             basis="v",
             use_dof=self.use_dof,
             n_dof=self.n_dof,
@@ -142,7 +142,7 @@ class State:
         )
 
     def __repr__(self) -> str:
-        return f"State({self.state!r}, basis={self.basis!r})"
+        return f"State({self.value!r}, basis={self.basis!r})"
 
 
 class StateFactory:
@@ -158,6 +158,9 @@ class StateFactory:
     A : array-like
         Sensitivity matrix.  The last axis has length ``n_dof``.
         All other axes are flattened before SVD.
+    norm : array-like of float
+        Normalization factors for each DOF.  The SVD is computed on
+        ``A @ np.diag(norm)``.
     use_dof : array-like of int
         Indices of the active DOFs.
     nkeep : int or None
@@ -168,9 +171,12 @@ class StateFactory:
     def __init__(
         self,
         A: NDArray[np.floating],
-        use_dof: NDArray[np.integer],
+        norm: NDArray[np.floating] | None = None,
+        use_dof: NDArray[np.integer] | str | None = None,
         nkeep: int | None = None,
     ):
+        if use_dof is None:
+            use_dof = np.arange(A.shape[-1])
         if isinstance(use_dof, str):
             dof_str = use_dof.replace(" ", "").strip()
             use_dof = []
@@ -181,20 +187,24 @@ class StateFactory:
                 else:
                     use_dof.append(int(part))
             use_dof = np.sort(use_dof)
+        if norm is None:
+            norm = np.ones(A.shape[-1], dtype=float)
         self.A = np.asarray(A, dtype=float)
         self.use_dof = np.asarray(use_dof, dtype=int)
         self.n_dof = self.A.shape[-1]
-        A_sliced = self.A[..., self.use_dof].reshape(-1, len(self.use_dof))
+        A_norm = self.A @ np.diag(norm)
+        A_sliced = A_norm[..., self.use_dof].reshape(-1, len(self.use_dof))
         U, S, Vh = np.linalg.svd(A_sliced, full_matrices=False)
         self.U = U
         self.S = S
         self.Vh = Vh
         self.nkeep = nkeep if nkeep is not None else len(S)
+        self.Av = self.A[..., self.use_dof] @ self.Vh[: self.nkeep].T
 
-    def from_x(self, state) -> State:
+    def from_x(self, value) -> State:
         """Create a State from active-DOF coefficients."""
         return State(
-            state=state,
+            value=value,
             basis="x",
             use_dof=self.use_dof,
             n_dof=self.n_dof,
@@ -202,10 +212,10 @@ class StateFactory:
             nkeep=self.nkeep,
         )
 
-    def from_f(self, state) -> State:
+    def from_f(self, value) -> State:
         """Create a State from full DOF coefficients."""
         return State(
-            state=state,
+            value=value,
             basis="f",
             use_dof=self.use_dof,
             n_dof=self.n_dof,
@@ -213,10 +223,10 @@ class StateFactory:
             nkeep=self.nkeep,
         )
 
-    def from_v(self, state) -> State:
+    def from_v(self, value) -> State:
         """Create a State from orthogonal-basis coefficients."""
         return State(
-            state=state,
+            value=value,
             basis="v",
             use_dof=self.use_dof,
             n_dof=self.n_dof,
