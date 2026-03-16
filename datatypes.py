@@ -36,8 +36,8 @@ class FieldCoords:
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
     wcs : BaseWCS or None
         WCS for converting between field-angle and focal-plane space.  Required for
-        space conversions.  WCS assumes field angles are in radians and focal-plane
-        coordinates are in mm.
+        space conversions.  WCS assumes field angles are in radians in OCS and
+        focal-plane coordinates are in mm in CCS.
     camera : Camera or None
         Camera geometry for determining detector numbers.  Required for
         ``detnum`` property.
