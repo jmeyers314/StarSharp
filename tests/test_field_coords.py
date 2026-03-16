@@ -230,6 +230,14 @@ class TestFieldCoordsEDCSDVCS:
         np.testing.assert_allclose(dvcs2.x, fc.x)
         np.testing.assert_allclose(dvcs2.y, fc.y)
 
+    def test_ocs_from_dvcs(self):
+        fc = _make_field(frame="dvcs", rtp=RTP)
+        ocs = fc.ocs
+        dvcs2 = ocs.dvcs
+        assert dvcs2.frame == "dvcs"
+        np.testing.assert_allclose(dvcs2.x, fc.x)
+        np.testing.assert_allclose(dvcs2.y, fc.y)
+
 
 class TestFieldCoordsFrameCase:
     def test_frame_coerced_to_lower(self):

@@ -308,3 +308,101 @@ class TestSpotsComputeMoments:
                     "batched moments_ccs.ocs != spots_ocs.compute_moments"
                 ),
             )
+
+
+class TestSpotsEDCSDVCS:
+    def test_edcs_noop_when_already_edcs(self):
+        sp = _make_spots(frame="edcs", rtp=RTP)
+        assert sp.edcs is sp
+        assert sp.frame == "edcs"
+
+    def test_dvcs_noop_when_already_dvcs(self):
+        sp = _make_spots(frame="dvcs", rtp=RTP)
+        assert sp.dvcs is sp
+        assert sp.frame == "dvcs"
+
+    def test_ccs_from_edcs_relabels(self):
+        sp = _make_spots(frame="edcs", rtp=RTP)
+        ccs = sp.ccs
+        assert ccs.frame == "ccs"
+        np.testing.assert_allclose(ccs.dx, sp.dx)
+        np.testing.assert_allclose(ccs.dy, sp.dy)
+
+    def test_edcs_from_ccs_relabels(self):
+        sp = _make_spots(frame="ccs", rtp=RTP)
+        edcs = sp.edcs
+        assert edcs.frame == "edcs"
+        np.testing.assert_allclose(edcs.dx, sp.dx)
+        np.testing.assert_allclose(edcs.dy, sp.dy)
+
+    def test_edcs_from_ocs(self):
+        sp = _make_spots(frame="ocs", rtp=RTP)
+        edcs = sp.edcs
+        ccs = sp.ccs
+        assert edcs.frame == "edcs"
+        np.testing.assert_allclose(edcs.dx, ccs.dx)
+        np.testing.assert_allclose(edcs.dy, ccs.dy)
+
+    def test_dvcs_from_edcs(self):
+        sp = _make_spots(frame="edcs", rtp=RTP)
+        dvcs = sp.dvcs
+        assert dvcs.frame == "dvcs"
+        np.testing.assert_allclose(dvcs.dx, sp.dy)
+        np.testing.assert_allclose(dvcs.dy, sp.dx)
+
+    def test_dvcs_from_ccs(self):
+        sp = _make_spots(frame="ccs", rtp=RTP)
+        dvcs = sp.dvcs
+        assert dvcs.frame == "dvcs"
+        np.testing.assert_allclose(dvcs.dx, sp.dy)
+        np.testing.assert_allclose(dvcs.dy, sp.dx)
+
+    def test_edcs_then_dvcs_then_edcs_roundtrip(self):
+        sp = _make_spots(frame="edcs", rtp=RTP)
+        dvcs = sp.dvcs
+        edcs2 = dvcs.edcs
+        assert edcs2.frame == "edcs"
+        np.testing.assert_allclose(edcs2.dx, sp.dx)
+        np.testing.assert_allclose(edcs2.dy, sp.dy)
+
+    def test_dvcs_then_edcs_then_dvcs_roundtrip(self):
+        sp = _make_spots(frame="dvcs", rtp=RTP)
+        edcs = sp.edcs
+        dvcs2 = edcs.dvcs
+        assert dvcs2.frame == "dvcs"
+        np.testing.assert_allclose(dvcs2.dx, sp.dx)
+        np.testing.assert_allclose(dvcs2.dy, sp.dy)
+
+    def test_ocs_from_dvcs(self):
+        sp = _make_spots(frame="dvcs", rtp=RTP)
+        ocs = sp.ocs
+        dvcs2 = ocs.dvcs
+        assert dvcs2.frame == "dvcs"
+        np.testing.assert_allclose(dvcs2.dx, sp.dx)
+        np.testing.assert_allclose(dvcs2.dy, sp.dy)
+
+
+class TestSpotsFrameCase:
+    def test_frame_coerced_to_lower(self):
+        sp = _make_spots(frame="OCS", rtp=RTP)
+        assert sp.frame == "ocs"
+        sp = _make_spots(frame="CCS", rtp=RTP)
+        assert sp.frame == "ccs"
+        sp = _make_spots(frame="EDCS", rtp=RTP)
+        assert sp.frame == "edcs"
+        sp = _make_spots(frame="DVCS", rtp=RTP)
+        assert sp.frame == "dvcs"
+
+    def test_mixed_case_frame(self):
+        sp = _make_spots(frame="oCs", rtp=RTP)
+        assert sp.frame == "ocs"
+        sp = _make_spots(frame="cCs", rtp=RTP)
+        assert sp.frame == "ccs"
+        sp = _make_spots(frame="EdCs", rtp=RTP)
+        assert sp.frame == "edcs"
+        sp = _make_spots(frame="DvCs", rtp=RTP)
+        assert sp.frame == "dvcs"
+
+    def test_invalid_frame_raises(self):
+        with pytest.raises(ValueError, match="frame must be one of"):
+            _make_spots(frame="notaframe", rtp=RTP)

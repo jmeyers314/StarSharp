@@ -121,15 +121,64 @@ class Spots:
         if self.frame == "ocs":
             return self
         rtp = self._require("rtp")
-        return self._rot(-rtp, "ocs")
+        return self.ccs._rot(-rtp, "ocs")
 
     @property
     def ccs(self) -> Spots:
-        """This spot in the CCS frame."""
+        """This spot in the CCS frame (always frame='ccs')."""
         if self.frame == "ccs":
             return self
-        rtp = self._require("rtp")
-        return self._rot(rtp, "ccs")
+        if self.frame == "ocs":
+            rtp = self._require("rtp")
+            return self._rot(rtp, "ccs")
+        dx = self.dx
+        dy = self.dy
+        if self.frame == "dvcs":
+            dx, dy = dy, dx
+        return Spots(
+            dx=dx,
+            dy=dy,
+            vignetted=self.vignetted,
+            field=self.field,
+            wavelength=self.wavelength,
+            frame="ccs",
+            rtp=self.rtp,
+            wcs=self.wcs,
+        )
+
+    @property
+    def edcs(self) -> Spots:
+        """This spot in the EDCS frame (synonym for CCS, but preserves name)."""
+        if self.frame == "edcs":
+            return self
+        ccs = self.ccs
+        return Spots(
+            dx=ccs.dx,
+            dy=ccs.dy,
+            vignetted=ccs.vignetted,
+            field=ccs.field,
+            wavelength=ccs.wavelength,
+            frame="edcs",
+            rtp=ccs.rtp,
+            wcs=ccs.wcs,
+        )
+
+    @property
+    def dvcs(self) -> Spots:
+        """This spot in the DVCS frame (transpose of EDCS/CCS)."""
+        if self.frame == "dvcs":
+            return self
+        ccs = self.ccs
+        return Spots(
+            dx=ccs.dy,
+            dy=ccs.dx,
+            vignetted=ccs.vignetted,
+            field=ccs.field,
+            wavelength=ccs.wavelength,
+            frame="dvcs",
+            rtp=ccs.rtp,
+            wcs=ccs.wcs,
+        )
 
     @property
     def focal_plane(self) -> Spots:
