@@ -164,3 +164,90 @@ class TestFieldCoordsSlicing:
         fc = _make_field()
         with pytest.raises(AttributeError):
             fc.x = 999 * u.deg
+
+
+class TestFieldCoordsEDCSDVCS:
+    def test_edcs_noop_when_already_edcs(self):
+        fc = _make_field(frame="edcs", rtp=RTP)
+        assert fc.edcs is fc
+        assert fc.frame == "edcs"
+
+    def test_dvcs_noop_when_already_dvcs(self):
+        fc = _make_field(frame="dvcs", rtp=RTP)
+        assert fc.dvcs is fc
+        assert fc.frame == "dvcs"
+
+    def test_ccs_from_edcs_relabels(self):
+        fc = _make_field(frame="edcs", rtp=RTP)
+        ccs = fc.ccs
+        assert ccs.frame == "ccs"
+        np.testing.assert_allclose(ccs.x, fc.x)
+        np.testing.assert_allclose(ccs.y, fc.y)
+
+    def test_edcs_from_ccs_relabels(self):
+        fc = _make_field(frame="ccs", rtp=RTP)
+        edcs = fc.edcs
+        assert edcs.frame == "edcs"
+        np.testing.assert_allclose(edcs.x, fc.x)
+        np.testing.assert_allclose(edcs.y, fc.y)
+
+    def test_edcs_from_ocs(self):
+        fc = _make_field(frame="ocs", rtp=RTP)
+        edcs = fc.edcs
+        # Should match ccs, but with frame 'edcs'
+        ccs = fc.ccs
+        assert edcs.frame == "edcs"
+        np.testing.assert_allclose(edcs.x, ccs.x)
+        np.testing.assert_allclose(edcs.y, ccs.y)
+
+    def test_dvcs_from_edcs(self):
+        fc = _make_field(frame="edcs", rtp=RTP)
+        dvcs = fc.dvcs
+        assert dvcs.frame == "dvcs"
+        np.testing.assert_allclose(dvcs.x, fc.y)
+        np.testing.assert_allclose(dvcs.y, fc.x)
+
+    def test_dvcs_from_ccs(self):
+        fc = _make_field(frame="ccs", rtp=RTP)
+        dvcs = fc.dvcs
+        assert dvcs.frame == "dvcs"
+        np.testing.assert_allclose(dvcs.x, fc.y)
+        np.testing.assert_allclose(dvcs.y, fc.x)
+
+    def test_edcs_then_dvcs_then_edcs_roundtrip(self):
+        fc = _make_field(frame="edcs", rtp=RTP)
+        dvcs = fc.dvcs
+        edcs2 = dvcs.edcs
+        assert edcs2.frame == "edcs"
+        np.testing.assert_allclose(edcs2.x, fc.x)
+        np.testing.assert_allclose(edcs2.y, fc.y)
+
+    def test_dvcs_then_edcs_then_dvcs_roundtrip(self):
+        fc = _make_field(frame="dvcs", rtp=RTP)
+        edcs = fc.edcs
+        dvcs2 = edcs.dvcs
+        assert dvcs2.frame == "dvcs"
+        np.testing.assert_allclose(dvcs2.x, fc.x)
+        np.testing.assert_allclose(dvcs2.y, fc.y)
+
+
+class TestFieldCoordsFrameCase:
+    def test_frame_coerced_to_lower(self):
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="OCS")
+        assert fc.frame == "ocs"
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="CCS")
+        assert fc.frame == "ccs"
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="EDCS")
+        assert fc.frame == "edcs"
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="DVCS")
+        assert fc.frame == "dvcs"
+
+    def test_mixed_case_frame(self):
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="oCs")
+        assert fc.frame == "ocs"
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="cCs")
+        assert fc.frame == "ccs"
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="EdCs")
+        assert fc.frame == "edcs"
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="DvCs")
+        assert fc.frame == "dvcs"

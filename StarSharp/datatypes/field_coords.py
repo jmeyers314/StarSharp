@@ -14,7 +14,7 @@ import galsim
 import astropy.units as u
 
 
-VALID_FRAMES = ("ocs", "ccs")
+VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
 
 
 @dataclass(frozen=True)
@@ -28,8 +28,8 @@ class FieldCoords:
         ``u.arcsec``) indicate field-angle space; length units
         (e.g. ``u.mm``) indicate focal-plane space.
     frame : str
-        Coordinate frame: ``'ocs'`` (optical, default) or ``'ccs'``
-        (camera).
+        Coordinate frame: ``'ocs'`` (optical, default), ``'ccs'`` (camera),
+        ``'dvcs'`` (detector), or ``'edcs'`` (engineering).
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
     wcs : BaseWCS or None
@@ -53,7 +53,10 @@ class FieldCoords:
             raise TypeError("x and y must be astropy Quantity instances with units")
         object.__setattr__(self, "x", np.atleast_1d(self.x))
         object.__setattr__(self, "y", np.atleast_1d(self.y))
-        if self.frame not in VALID_FRAMES:
+        # Coerce frame to lower case, but preserve original name (including 'edcs')
+        frame = self.frame.lower()
+        object.__setattr__(self, "frame", frame)
+        if frame not in VALID_FRAMES:
             raise ValueError(f"frame must be one of {VALID_FRAMES}, got {self.frame!r}")
         if not (self.x.unit.physical_type == self.y.unit.physical_type):
             raise ValueError(
@@ -132,15 +135,58 @@ class FieldCoords:
         if self.frame == "ocs":
             return self
         rtp = self._require("rtp")
-        return self._rot(-rtp, "ocs")
+        return self.ccs._rot(-rtp, "ocs")
 
     @property
     def ccs(self) -> FieldCoords:
-        """This coordinate in the CCS frame."""
+        """This coordinate in the CCS frame (always frame='ccs')."""
         if self.frame == "ccs":
             return self
-        rtp = self._require("rtp")
-        return self._rot(rtp, "ccs")
+        if self.frame == "ocs":
+            rtp = self._require("rtp")
+            return self._rot(rtp, "ccs")
+        x = self.x
+        y = self.y
+        if self.frame == "dvcs":
+            x, y = y, x
+        return FieldCoords(
+            x=x,
+            y=y,
+            frame="ccs",
+            rtp=self.rtp,
+            wcs=self.wcs,
+            camera=self.camera,
+        )
+
+    @property
+    def edcs(self) -> FieldCoords:
+        """This coordinate in the EDCS frame (synonym for CCS, but preserves name)."""
+        if self.frame == "edcs":
+            return self
+        ccs = self.ccs
+        return FieldCoords(
+            x=ccs.x,
+            y=ccs.y,
+            frame="edcs",
+            rtp=ccs.rtp,
+            wcs=ccs.wcs,
+            camera=ccs.camera,
+        )
+
+    @property
+    def dvcs(self) -> FieldCoords:
+        """This coordinate in the DVCS frame (transpose of EDCS/CCS)."""
+        if self.frame == "dvcs":
+            return self
+        ccs = self.ccs
+        return FieldCoords(
+            x=ccs.y,
+            y=ccs.x,
+            frame="dvcs",
+            rtp=ccs.rtp,
+            wcs=ccs.wcs,
+            camera=ccs.camera,
+        )
 
     @property
     def focal_plane(self) -> FieldCoords:
