@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from batoid_rubin import LSSTBuilder
 from dataclasses import dataclass
 from astropy.units import Quantity
 from astropy.coordinates import Angle
@@ -81,19 +82,19 @@ class FieldCoords:
         return val
 
     @classmethod
-    def from_telescope_wcs(
+    def from_builder(
         cls,
         x: Quantity,
         y: Quantity,
         *,
-        telescope: batoid.Optic,
+        builder: LSSTBuilder,
         wavelength: Quantity,
         rtp: Optional[Angle] = None,
         **kwargs,
     ) -> FieldCoords:
         if rtp is None:
             rtp = Angle("0 deg")
-        rotated = telescope.withLocallyRotatedOptic("LSSTCamera", batoid.RotZ(rtp.rad))
+        rotated = builder.with_rtp(rtp).build()
         nrad = 20
         th_u, th_v = batoid.utils.hexapolar(
             np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad)
@@ -224,6 +225,10 @@ class FieldCoords:
         if isinstance(wcs, CelestialWCS):
             kwargs["units"] = "radians"
         fx, fy = wcs.toWorld(*args, **kwargs)
+        # Really need to move away from CelestialWCS, but for now can just wrap
+        # towards 0
+        fx[fx > np.pi] -= 2 * np.pi
+        fy[fy > np.pi] -= 2 * np.pi
         field_ocs = FieldCoords(
             x=fx << u.radian,
             y=fy << u.radian,
