@@ -51,7 +51,7 @@ class RaytracedOpticalModel:
         builder = (
             self.builder
             .with_rtp(self.rtp)
-            .with_aos_dof(state.f.state)
+            .with_aos_dof(state.f.value)
         )
 
         dx = np.full((len(field.x), len(px)), np.nan)
@@ -116,7 +116,7 @@ class RaytracedOpticalModel:
         builder = (
             self.builder
             .with_rtp(self.rtp)
-            .with_aos_dof(state.f.state)
+            .with_aos_dof(state.f.value)
         )
 
         bar = self.tqdm(desc="Raytracing", total=len(field.x)) if self.tqdm is not None else None
