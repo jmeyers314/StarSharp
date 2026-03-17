@@ -25,8 +25,11 @@ angles = np.linspace(-90, 90, 37) * u.deg
 frame_dir = Path("frames_intrinsic")
 frame_dir.mkdir(exist_ok=True)
 
-sf = StateFactory(50, use_dof=[5, 8, 9])
+sf3 = StateFactory(50, use_dof=[5, 8, 9])
+sf2 = StateFactory(50, use_dof=[8, 9])
+offset = sf3.from_x([3.0, 0.005, 0.005])
 
+states = {}
 for i, rtp in enumerate(tqdm(angles, desc="Rendering frames")):
     rtp = Angle(rtp)
     model = RaytracedOpticalModel(
@@ -39,14 +42,18 @@ for i, rtp in enumerate(tqdm(angles, desc="Rendering frames")):
     field = model.make_ccd_field(nx=4, types=("E2V", "ITL", "ITL_WF"))
 
     opt = model.optimize(
-        sf.from_x([0.0, 0.0, 0.0]),
-        field=model.make_ccd_field(nx=1),
-        verbose=0,
+        sf2.from_x([0.0, 0.0]),
+        field=model.make_ccd_field(nx=1, detnums=list(range(4, 189, 9))),
         nrad=5,
         mode="size",
+        ftol=1e-3,
+        gtol=1e-3,
+        xtol=1e-3,
+        offset=offset,
     )
+    states[rtp] = opt
 
-    zk = model.zernikes(state=opt, field=field)
+    zk = model.zernikes(state=opt+offset, field=field)
 
     fig, ax = plt.subplots(figsize=(7, 7))
     for det in camera:
@@ -74,3 +81,14 @@ for i, rtp in enumerate(tqdm(angles, desc="Rendering frames")):
 
     fig.savefig(frame_dir / f"frame_{i:03d}.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+degs = np.array([k.deg for k in states.keys()])
+states = np.array([s.x.value for s in states.values()])
+fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(10, 7))
+for i in range(2):
+    ax = axs[i]
+    ax.plot(degs, states[:, i])
+    ax.set_xlabel("RTP (deg)")
+axs[0].set_ylabel(f"Cam rx (degree)")
+axs[1].set_ylabel(f"Cam ry (degree)")
+fig.savefig(frame_dir / "intrinsic_dofs.png", dpi=150, bbox_inches="tight")
