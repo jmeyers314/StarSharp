@@ -4,8 +4,9 @@ import numpy as np
 
 from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
+from lsst.afw.cameraGeom import Camera, FOCAL_PLANE
 from tqdm import tqdm
-from typing import Optional
+from numpy.typing import NDArray
 
 from ..datatypes import FieldCoords, Spots, Zernikes, State
 
@@ -22,12 +23,77 @@ class RaytracedOpticalModel:
         builder: LSSTBuilder,
         rtp: Angle,
         wavelength: float,
-        tqdm: Optional[tqdm] = None,
+        camera: Camera | None = None,
+        tqdm: tqdm | None = None,
     ):
         self.builder = builder
         self.rtp = rtp
         self.wavelength = wavelength
+        self.camera = camera
         self.tqdm = tqdm
+
+    def make_hex_field(
+        self,
+        outer = 2.0 * u.deg,
+        nrad = 20,
+        naz = None,
+        frame = "ocs"
+    ):
+        if naz is None:
+            naz = int(2 * np.pi * nrad)
+        thx, thy = batoid.utils.hexapolar(
+            outer=outer.to_value(u.deg),
+            nrad=nrad,
+            naz=naz
+        )
+        return FieldCoords.from_builder(
+            thx * u.deg, thy * u.deg,
+            builder=self.builder,
+            wavelength=self.wavelength,
+            rtp=self.rtp,
+            camera=self.camera,
+            frame=frame
+        )
+
+    def make_ccd_field(
+        self,
+        nx: int = 1,
+        frame = "ocs",
+        types = ("E2V", "ITL"),
+        detnums: set[int] | None = None,
+    ):
+        if self.camera is None:
+            raise ValueError("Camera must be set on the model to use this method")
+        if detnums is None:
+            detnums = set(range(len(self.camera)))
+        x = []
+        y = []
+        for det in self.camera:
+            if det.getId() not in detnums:
+                continue
+            if det.getPhysicalType() not in types:
+                continue
+            corners = det.getCorners(FOCAL_PLANE)
+            xmin = min(c[1] for c in corners)
+            xmax = max(c[1] for c in corners)
+            ymin = min(c[0] for c in corners)
+            ymax = max(c[0] for c in corners)
+            xx = np.linspace(xmin, xmax, nx+1)
+            yy = np.linspace(ymin, ymax, nx+1)
+            xx = 0.5*(xx[1:] + xx[:-1])
+            yy = 0.5*(yy[1:] + yy[:-1])
+            xx, yy = np.meshgrid(xx, yy)
+            x.extend(xx.ravel())
+            y.extend(yy.ravel())
+        fc = FieldCoords.from_builder(
+            np.array(x) << u.mm, np.array(y) << u.mm,
+            builder=self.builder,
+            wavelength=self.wavelength,
+            rtp=self.rtp,
+            camera=self.camera,
+            frame="ccs"
+        )
+        return getattr(fc, frame)
 
     def spots(
         self,
@@ -35,7 +101,7 @@ class RaytracedOpticalModel:
         field: FieldCoords,
         nrad: int = 10,
     ) -> Spots:
-        field = field.ocs
+        field = field.angle.ocs
         if not np.allclose(field.rtp, self.rtp):
             raise ValueError(f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})")
         # Pick an outer radius that is half a grid radius smaller than the outer pupil
@@ -110,7 +176,7 @@ class RaytracedOpticalModel:
         jmax: int = 28,
         rings: int = 10,
     ) -> Zernikes:
-        field = field.ocs
+        field = field.angle.ocs
         if not np.allclose(field.rtp, self.rtp):
             raise ValueError(f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})")
         builder = (
@@ -151,4 +217,74 @@ class RaytracedOpticalModel:
             jmax=jmax,
             frame="ocs",
             rtp=self.rtp
+        )
+
+    def _optimize_dx_func(
+        self,
+        params: np.ndarray,
+        field: FieldCoords,
+        nrad: int = 10,
+        use_dof: NDArray[np.integer] | None = None,
+    ):
+        value = np.zeros(50, dtype=np.float64)
+        value[use_dof] = params
+        state = State(
+            value=value,
+            basis="f",
+        )
+        spots = self.spots(state, field, nrad=nrad)
+        vignetted = spots.vignetted
+        return np.concatenate([spots.dx[~vignetted].to_value(u.micron), spots.dy[~vignetted].to_value(u.micron)])
+
+    def _optimize_func(
+        self,
+        params: np.ndarray,
+        field: FieldCoords,
+        nrad: int = 10,
+        use_dof: NDArray[np.integer] | None = None,
+    ):
+        value = np.zeros(50, dtype=np.float64)
+        value[use_dof] = params
+        state = State(
+            value=value,
+            basis="f",
+        )
+        spots = self.spots(state, field, nrad=nrad)
+        sizes = []
+        for ispot in range(len(spots)):
+            vignetted = spots.vignetted[ispot]
+            dx = spots.dx[ispot][~vignetted].to_value(u.micron)
+            dy = spots.dy[ispot][~vignetted].to_value(u.micron)
+            if len(dx) == 0 or len(dy) == 0:
+                sizes.append(np.inf)
+                continue
+            sizes.append(np.var(dx) + np.var(dy))
+        return np.array(sizes)
+
+    def optimize(
+        self,
+        guess: State,
+        field: FieldCoords,
+        nrad: int = 10,
+        mode: str = "dx",
+        verbose: int = 0,
+    ) -> State:
+        from scipy.optimize import least_squares
+        func = self._optimize_dx_func if mode == "dx" else self._optimize_func
+
+        x0 = guess.x.value
+        result = least_squares(
+            func,
+            x0,
+            args=(field, nrad, guess.use_dof),
+            xtol=1e-6,
+            ftol=1e-6,
+            gtol=1e-6,
+            verbose=verbose
+        )
+        return State(
+            value=result.x,
+            basis="x",
+            use_dof=guess.use_dof,
+            n_dof=guess.n_dof,
         )
