@@ -198,9 +198,10 @@ class FieldCoords:
         wcs = self._require("wcs")
         field = self.ocs
         args = [field.x.to_value(u.radian), field.y.to_value(u.radian)]
+        kwargs = {}
         if isinstance(wcs, CelestialWCS):
-            args.append("radians")
-        fpx, fpy = wcs.toImage(*args)
+            kwargs["units"] = "radians"
+        fpx, fpy = wcs.toImage(*args, **kwargs)
         fp_ccs = FieldCoords(
             x=fpx << u.mm,
             y=fpy << u.mm,
@@ -219,9 +220,10 @@ class FieldCoords:
         wcs = self._require("wcs")
         fp = self.ccs
         args = [fp.x.to_value(u.mm), fp.y.to_value(u.mm)]
+        kwargs = {}
         if isinstance(wcs, CelestialWCS):
-            args.append("radians")
-        fx, fy = wcs.toWorld(*args)
+            kwargs["units"] = "radians"
+        fx, fy = wcs.toWorld(*args, **kwargs)
         field_ocs = FieldCoords(
             x=fx << u.radian,
             y=fy << u.radian,
