@@ -140,6 +140,30 @@ class State:
     def __repr__(self) -> str:
         return f"State({self.value!r}, basis={self.basis!r})"
 
+    def __add__(self, other):
+        if not isinstance(other, State):
+            return NotImplemented
+        if self.n_dof is not None and other.n_dof is not None and self.n_dof != other.n_dof:
+            raise ValueError("Cannot add States with different n_dof")
+
+        if self.use_dof is not None and other.use_dof is not None and np.array_equal(self.use_dof, other.use_dof):
+            if self.n_dof is not None and other.n_dof is not None and self.n_dof == other.n_dof:
+                if self.Vh is not None and other.Vh is not None and np.array_equal(self.Vh, other.Vh):
+                    # Same use_dof, n_dof, and Vh: add in v-basis
+                    return State(
+                        value=self.v.value + other.v.value,
+                        basis="v",
+                        use_dof=self.use_dof,
+                        n_dof=self.n_dof,
+                        Vh=self.Vh,
+                    )
+
+        return State(
+            value=self.f.value + other.f.value,
+            basis="f",
+            n_dof=self.n_dof if self.n_dof is not None else None,
+        )
+
 
 class StateFactory:
     """Factory for creating `State` objects with shared SVD context.

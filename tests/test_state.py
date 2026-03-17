@@ -149,6 +149,66 @@ class TestStateConversions:
         np.testing.assert_allclose(vs.x.value, [1.0, 2.0, 3.0, 4.0], atol=1e-12)
 
 
+class TestStateAdd:
+    def test_add_x_states(self):
+        rng = np.random.default_rng(423)
+        A = rng.standard_normal((30, 10))
+        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=5)
+
+        s1 = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
+        s2 = sf.from_x(np.array([0.5, -1.0, 2.0, 0.0, 1.5]))
+
+        s3 = s1 + s2
+        np.testing.assert_allclose(s3.x.value, [1.5, 1.0, 5.0, 4.0, 6.5])
+        np.testing.assert_allclose(s1.x.value, [1.0, 2.0, 3.0, 4.0, 5.0])
+        np.testing.assert_allclose(s2.x.value, [0.5, -1.0, 2.0, 0.0, 1.5])
+
+    def test_add_x_and_f(self):
+        rng = np.random.default_rng(422)
+        A = rng.standard_normal((30, 10))
+        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=5)
+
+        sx = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
+        ssum = sx + sx.f
+        np.testing.assert_allclose(ssum.x.value, 2.0 * sx.x.value, atol=1e-12)
+        np.testing.assert_allclose(ssum.use_dof, sx.use_dof, atol=1e-12)
+        np.testing.assert_allclose(ssum.n_dof, sx.n_dof, atol=1e-12)
+        np.testing.assert_allclose(ssum.Vh, sx.Vh, atol=1e-12)
+
+    def test_add_x_and_v(self):
+        rng = np.random.default_rng(421)
+        A = rng.standard_normal((30, 10))
+        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=5)
+
+        sx = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
+        ssum = sx + sx.v
+        np.testing.assert_allclose(ssum.x.value, 2.0 * sx.x.value, atol=1e-12)
+        np.testing.assert_allclose(ssum.use_dof, sx.use_dof, atol=1e-12)
+        np.testing.assert_allclose(ssum.n_dof, sx.n_dof, atol=1e-12)
+        np.testing.assert_allclose(ssum.Vh, sx.Vh, atol=1e-12)
+
+    def test_add_raises_for_mismatched_n_dof(self):
+        s1 = State(value=np.ones(3), basis="x", use_dof=np.arange(3), n_dof=5)
+        s2 = State(value=np.ones(3), basis="x", use_dof=np.arange(3), n_dof=6)
+        with pytest.raises(ValueError, match="different n_dof"):
+            _ = s1 + s2
+
+    def test_add_falls_back_to_f_basis(self):
+        rng = np.random.default_rng(424)
+        A = rng.standard_normal((30, 10))
+        sf = StateFactory(A=A, use_dof=np.arange(7), nkeep=5)
+        sf2 = StateFactory(A=A, use_dof=np.arange(8), nkeep=5)
+
+        s1 = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]))
+        s2 = sf2.from_x(np.array([0.5, -1.0, 2.0, 0.0, 1.5, -0.5, 0.0, 0.0]))
+        ssum = s1 + s2
+        assert ssum.basis == "f"
+        np.testing.assert_allclose(
+            ssum.value, s1.f.value + s2.f.value,
+            atol=1e-12
+        )
+
+
 class TestStateRequires:
     def test_f_to_x_requires_use_dof(self):
         s = State(value=np.zeros(10), basis="f")
@@ -234,3 +294,4 @@ class TestStateFactory:
         # If norm is all ones, should match no-norm
         sf_ones = StateFactory(A=A, use_dof=np.arange(5), norm=np.ones(5))
         np.testing.assert_allclose(sf_ones.S, sf_no_norm.S)
+
