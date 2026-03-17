@@ -225,9 +225,12 @@ class RaytracedOpticalModel:
         field: FieldCoords,
         nrad: int = 10,
         use_dof: NDArray[np.integer] | None = None,
+        offset: State | None = None,
     ):
         value = np.zeros(50, dtype=np.float64)
         value[use_dof] = params
+        if offset is not None:
+            value += offset.f.value
         state = State(
             value=value,
             basis="f",
@@ -242,9 +245,12 @@ class RaytracedOpticalModel:
         field: FieldCoords,
         nrad: int = 10,
         use_dof: NDArray[np.integer] | None = None,
+        offset: State | None = None,
     ):
         value = np.zeros(50, dtype=np.float64)
         value[use_dof] = params
+        if offset is not None:
+            value += offset.f.value
         state = State(
             value=value,
             basis="f",
@@ -265,9 +271,10 @@ class RaytracedOpticalModel:
         self,
         guess: State,
         field: FieldCoords,
+        offset: State | None = None,
         nrad: int = 10,
         mode: str = "dx",
-        verbose: int = 0,
+        **kwargs,
     ) -> State:
         from scipy.optimize import least_squares
         func = self._optimize_dx_func if mode == "dx" else self._optimize_func
@@ -276,11 +283,8 @@ class RaytracedOpticalModel:
         result = least_squares(
             func,
             x0,
-            args=(field, nrad, guess.use_dof),
-            xtol=1e-6,
-            ftol=1e-6,
-            gtol=1e-6,
-            verbose=verbose
+            args=(field, nrad, guess.use_dof, offset),
+            **kwargs,
         )
         return State(
             value=result.x,
