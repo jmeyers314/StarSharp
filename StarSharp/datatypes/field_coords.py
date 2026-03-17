@@ -4,7 +4,6 @@ from batoid_rubin import LSSTBuilder
 from dataclasses import dataclass
 from astropy.units import Quantity
 from astropy.coordinates import Angle
-from typing import Optional
 import numpy as np
 from numpy.typing import NDArray
 from galsim.wcs import BaseWCS, CelestialWCS
@@ -47,9 +46,9 @@ class FieldCoords:
     x: Quantity
     y: Quantity
     frame: str = "ocs"
-    rtp: Optional[Angle] = None
-    wcs: Optional[BaseWCS] = None
-    camera: Optional[Camera] = None
+    rtp: Angle | None = None
+    wcs: BaseWCS | None = None
+    camera: Camera | None = None
 
     def __post_init__(self):
         if not isinstance(self.x, Quantity) or not isinstance(self.y, Quantity):
@@ -89,7 +88,7 @@ class FieldCoords:
         *,
         builder: LSSTBuilder,
         wavelength: Quantity,
-        rtp: Optional[Angle] = None,
+        rtp: Angle | None = None,
         **kwargs,
     ) -> FieldCoords:
         if rtp is None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import astropy.units as u
 import galsim
@@ -45,8 +44,8 @@ class Spots:
     field: FieldCoords
     wavelength: Quantity | None = None
     frame: str = "ccs"
-    rtp: Optional[Angle] = None
-    wcs: Optional[BaseWCS] = None
+    rtp: Angle | None = None
+    wcs: BaseWCS | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dx", np.atleast_1d(self.dx))

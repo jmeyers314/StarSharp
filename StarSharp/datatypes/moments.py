@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 import itertools
 from dataclasses import make_dataclass
-from typing import Optional
 
 import numpy as np
 from astropy.coordinates import Angle
@@ -68,8 +67,8 @@ class Moments:
             moment_fields = [(f, Quantity) for f in moment_names]
             meta_fields = [
                 ('frame', str, dataclasses.field(default='ocs')),
-                ('field', Optional[FieldCoords], dataclasses.field(default=None)),
-                ('rtp', Optional[Angle], dataclasses.field(default=None)),
+                ('field', FieldCoords | None, dataclasses.field(default=None)),
+                ('rtp', Angle | None, dataclasses.field(default=None)),
             ]
             cls._cache[order] = make_dataclass(
                 f"Moments{order}",

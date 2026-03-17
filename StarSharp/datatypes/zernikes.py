@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import astropy.units as u
 import galsim
@@ -41,7 +40,7 @@ class Zernikes:
     wavelength: Quantity | None = None
     jmax: int | None = None
     frame: str = "ocs"
-    rtp: Optional[Angle] = None
+    rtp: Angle | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "coefs", np.atleast_1d(self.coefs))
