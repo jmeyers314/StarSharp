@@ -8,7 +8,7 @@ from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE
 from lsst.obs.lsst import LsstCam
-from StarSharp import RaytracedOpticalModel, State
+from StarSharp import RaytracedOpticalModel, State, StateFactory
 from tqdm import tqdm
 
 fiducial = batoid.Optic.fromYaml("Rubin_v3.14_r.yaml")
@@ -25,6 +25,8 @@ angles = np.linspace(-90, 90, 37) * u.deg
 frame_dir = Path("frames_intrinsic")
 frame_dir.mkdir(exist_ok=True)
 
+sf = StateFactory(50, use_dof=[5, 8, 9])
+
 for i, rtp in enumerate(tqdm(angles, desc="Rendering frames")):
     rtp = Angle(rtp)
     model = RaytracedOpticalModel(
@@ -37,7 +39,7 @@ for i, rtp in enumerate(tqdm(angles, desc="Rendering frames")):
     field = model.make_ccd_field(nx=4, types=("E2V", "ITL", "ITL_WF"))
 
     opt = model.optimize(
-        State(np.zeros(50), basis="f", use_dof=[5, 8, 9], n_dof=50),
+        sf.from_x([0.0, 0.0, 0.0]),
         field=model.make_ccd_field(nx=1),
         verbose=0,
         nrad=5,

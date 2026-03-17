@@ -7,13 +7,15 @@ import pytest
 from StarSharp.datatypes import State, StateFactory
 
 
-def _make_Vh(n_active, rng=None):
-    """Build an orthogonal Vh matrix of shape (n_active, n_active)."""
+def _make_Vh(n_active, nkeep=None, rng=None):
+    """Build an orthogonal Vh matrix of shape (nkeep, n_active)."""
     if rng is None:
         rng = np.random.default_rng(99)
     A = rng.standard_normal((n_active * 3, n_active))
     _, _, Vh = np.linalg.svd(A, full_matrices=False)
-    return Vh
+    if nkeep is None:
+        nkeep = n_active
+    return Vh[:nkeep]
 
 
 class TestStateConstruction:
@@ -31,17 +33,12 @@ class TestStateConstruction:
         assert s.n_dof == 10  # inferred
 
     def test_from_v(self):
-        Vh = _make_Vh(5)
+        Vh = _make_Vh(5, 3)
         s = State(
-            value=np.ones(3), basis="v", Vh=Vh, nkeep=3, use_dof=np.arange(5), n_dof=10
+            value=np.ones(3), basis="v", Vh=Vh, use_dof=np.arange(5), n_dof=10
         )
         assert s.basis == "v"
         assert s.nkeep == 3
-
-    def test_nkeep_inferred_from_Vh(self):
-        Vh = _make_Vh(5)
-        s = State(value=np.ones(5), basis="x", use_dof=np.arange(5), n_dof=10, Vh=Vh)
-        assert s.nkeep == 5  # inferred from Vh.shape[0]
 
     def test_invalid_basis(self):
         with pytest.raises(ValueError, match="basis must be"):
@@ -72,9 +69,9 @@ class TestStateConversions:
         assert s.f is s
 
     def test_v_identity(self):
-        Vh = _make_Vh(5)
+        Vh = _make_Vh(5, 3)
         s = State(
-            value=np.ones(3), basis="v", Vh=Vh, nkeep=3, use_dof=np.arange(5), n_dof=10
+            value=np.ones(3), basis="v", Vh=Vh, use_dof=np.arange(5), n_dof=10
         )
         assert s.v is s
 
@@ -99,7 +96,7 @@ class TestStateConversions:
     def test_x_to_v_roundtrip_full_rank(self):
         """When nkeep == len(use_dof), x->v->x is lossless."""
         n_active = 5
-        Vh = _make_Vh(n_active)
+        Vh = _make_Vh(n_active, 5)
         xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         s = State(
             value=xvals,
@@ -107,7 +104,6 @@ class TestStateConversions:
             use_dof=np.arange(n_active),
             n_dof=10,
             Vh=Vh,
-            nkeep=n_active,
         )
         np.testing.assert_allclose(s.v.x.value, xvals, atol=1e-12)
 
@@ -115,7 +111,7 @@ class TestStateConversions:
         """When nkeep < len(use_dof), x->v->x is lossy."""
         n_active = 5
         nkeep = 3
-        Vh = _make_Vh(n_active)
+        Vh = _make_Vh(n_active, nkeep)
         xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         s = State(
             value=xvals,
@@ -123,7 +119,6 @@ class TestStateConversions:
             use_dof=np.arange(n_active),
             n_dof=10,
             Vh=Vh,
-            nkeep=nkeep,
         )
         recovered = s.v.x.value
         assert not np.allclose(recovered, xvals)
@@ -132,9 +127,9 @@ class TestStateConversions:
     def test_v_to_f(self):
         n_active = 4
         use_dof = np.array([1, 3, 5, 7])
-        Vh = _make_Vh(n_active)
+        Vh = _make_Vh(n_active, 3)
         vvals = np.ones(3)
-        s = State(value=vvals, basis="v", use_dof=use_dof, n_dof=10, Vh=Vh, nkeep=3)
+        s = State(value=vvals, basis="v", use_dof=use_dof, n_dof=10, Vh=Vh)
         fs = s.f
         assert fs.basis == "f"
         assert len(fs.value) == 10
@@ -147,7 +142,7 @@ class TestStateConversions:
         Vh = _make_Vh(n_active)
         fvals = np.zeros(10)
         fvals[use_dof] = [1.0, 2.0, 3.0, 4.0]
-        s = State(value=fvals, basis="f", use_dof=use_dof, Vh=Vh, nkeep=4)
+        s = State(value=fvals, basis="f", use_dof=use_dof, Vh=Vh)
         vs = s.v
         assert vs.basis == "v"
         assert len(vs.value) == 4
@@ -182,7 +177,8 @@ class TestStateFactory:
         use_dof = np.array([0, 2, 4, 6, 8])
         sf = StateFactory(A=A, use_dof=use_dof, nkeep=3)
         assert sf.n_dof == 10
-        assert sf.Vh.shape == (5, 5)
+        assert sf.Vh.shape == (3, 5)
+        assert sf.full_Vh.shape == (5, 5)
         assert len(sf.S) == 5
         assert sf.nkeep == 3
 

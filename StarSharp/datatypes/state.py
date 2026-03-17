@@ -27,9 +27,9 @@ class State:
     ``"x"`` — active-DOF vector (length ``len(use_dof)``).
         The entries of the full vector selected by ``use_dof``.
     ``"v"`` — SVD-truncated orthogonal-basis vector (length ``nkeep``).
-        Only available when ``Vh`` (and optionally ``nkeep``) are set.
+        Only available when ``Vh`` is set.
         The roundtrip ``x → v → x`` is lossy when
-        ``nkeep < len(use_dof)``, though ``v → x → v`` is lossless.
+        ``Vh`` is not square, though ``v → x → v`` is lossless.
 
     Parameters
     ----------
@@ -46,11 +46,8 @@ class State:
         ``basis="f"``.  Required when constructing in ``"x"`` or
         ``"v"`` basis and converting to ``"f"``.
     Vh : NDArray[np.floating] or None
-        Right singular vectors, shape ``(len(use_dof), len(use_dof))``.
+        Right singular vectors, shape ``(nkeep, len(use_dof))``.
         Required for any conversion involving the ``"v"`` basis.
-    nkeep : int or None
-        Number of SVD modes retained.  Defaults to ``Vh.shape[0]``
-        when ``Vh`` is provided.
     """
 
     value: NDArray[np.floating]
@@ -58,7 +55,6 @@ class State:
     use_dof: NDArray[np.integer] | None = None
     n_dof: int | None = None
     Vh: NDArray[np.floating] | None = None
-    nkeep: int | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "value", np.asarray(self.value, dtype=float))
@@ -68,16 +64,21 @@ class State:
             object.__setattr__(self, "n_dof", len(self.value))
         if self.basis == "v" and self.Vh is None:
             raise ValueError(
-                "Vh (and nkeep) must be set when constructing State with basis='v'"
+                "Vh must be set when constructing State with basis='v'"
             )
-        if self.Vh is not None and self.nkeep is None:
-            object.__setattr__(self, "nkeep", self.Vh.shape[0])
 
     def _require(self, name: str):
         val = getattr(self, name)
         if val is None:
             raise ValueError(f"{name} must be set on the State to use this conversion")
         return val
+
+    @property
+    def nkeep(self) -> int | None:
+        """Number of SVD modes retained.  Only relevant when Vh is set."""
+        if self.Vh is not None:
+            return self.Vh.shape[0]
+        return None
 
     @property
     def x(self) -> State:
@@ -92,18 +93,15 @@ class State:
                 use_dof=self.use_dof,
                 n_dof=self.n_dof,
                 Vh=self.Vh,
-                nkeep=self.nkeep,
             )
         # basis == "v"
         Vh = self._require("Vh")
-        nkeep = self._require("nkeep")
         return State(
-            value=self.value @ Vh[:nkeep],
+            value=self.value @ Vh,
             basis="x",
             use_dof=self.use_dof,
             n_dof=self.n_dof,
             Vh=self.Vh,
-            nkeep=self.nkeep,
         )
 
     @property
@@ -122,7 +120,6 @@ class State:
             use_dof=self.use_dof,
             n_dof=n_dof,
             Vh=self.Vh,
-            nkeep=self.nkeep,
         )
 
     @property
@@ -131,15 +128,13 @@ class State:
         if self.basis == "v":
             return self
         Vh = self._require("Vh")
-        nkeep = self._require("nkeep")
         xs = self.x  # go through x-basis
         return State(
-            value=xs.value @ Vh[:nkeep].T,
+            value=xs.value @ Vh.T,
             basis="v",
             use_dof=self.use_dof,
             n_dof=self.n_dof,
             Vh=self.Vh,
-            nkeep=self.nkeep,
         )
 
     def __repr__(self) -> str:
@@ -151,8 +146,8 @@ class StateFactory:
 
     Accepts the full sensitivity matrix ``A`` and computes the SVD
     on construction.  All ``State`` objects produced by this factory
-    carry the ``use_dof``, ``n_dof``, ``Vh``, and ``nkeep`` needed
-    for basis conversions.
+    carry the ``use_dof``, ``n_dof``, and ``Vh`` needed for basis
+    conversions.
 
     Parameters
     ----------
@@ -171,11 +166,13 @@ class StateFactory:
 
     def __init__(
         self,
-        A: NDArray[np.floating],
+        A: NDArray[np.floating] | int,
         norm: NDArray[np.floating] | None = None,
         use_dof: NDArray[np.integer] | str | None = None,
         nkeep: int | None = None,
     ):
+        if isinstance(A, int):
+            A = np.eye(A)
         if use_dof is None:
             use_dof = np.arange(A.shape[-1])
         if isinstance(use_dof, str):
@@ -198,9 +195,10 @@ class StateFactory:
         U, S, Vh = np.linalg.svd(A_sliced, full_matrices=False)
         self.U = U
         self.S = S
-        self.Vh = Vh
+        self.full_Vh = Vh
         self.nkeep = nkeep if nkeep is not None else len(S)
-        self.Av = self.A[..., self.use_dof] @ self.Vh[: self.nkeep].T
+        self.Vh = Vh[: self.nkeep] @ np.diag(norm[use_dof])
+        self.Av = self.A[..., self.use_dof] @ self.Vh.T
 
     def from_x(self, value) -> State:
         """Create a State from active-DOF coefficients."""
@@ -210,7 +208,6 @@ class StateFactory:
             use_dof=self.use_dof,
             n_dof=self.n_dof,
             Vh=self.Vh,
-            nkeep=self.nkeep,
         )
 
     def from_f(self, value) -> State:
@@ -221,7 +218,6 @@ class StateFactory:
             use_dof=self.use_dof,
             n_dof=self.n_dof,
             Vh=self.Vh,
-            nkeep=self.nkeep,
         )
 
     def from_v(self, value) -> State:
@@ -232,5 +228,4 @@ class StateFactory:
             use_dof=self.use_dof,
             n_dof=self.n_dof,
             Vh=self.Vh,
-            nkeep=self.nkeep,
         )
