@@ -32,6 +32,31 @@ class RaytracedOpticalModel:
         self.camera = camera
         self.tqdm = tqdm
 
+        # Living a little dangerously here by assuming the builder's use_m1m3_modes and
+        # use_m2_modes are enough to indicate "standard" dofs and thus step sizes.
+        if (self.builder.use_m1m3_modes == list(range(19))+[26]
+            and self.builder.use_m2_modes == list(range(17))+[25, 26, 27]
+        ):
+            self.steps = [
+                10.0,  # M2 dz
+                500.0,
+                500.0,  # M2 dx, dy
+                10.0,
+                10.0,  # M2 rx, ry
+                10.0,  # cam dz
+                2000.0,
+                2000.0,  # cam dx, dy
+                10.0,
+                10.0,  # cam rx, ry
+            ]
+            self.steps += [0.1] * 40  # bending modes
+            if self.builder.dof_angle_units == "degree":
+                self.steps[3:5] = [0.003, 0.003]
+                self.steps[8:10] = [0.003, 0.003]
+            self.steps = np.array(self.steps)
+        else:
+            self.steps = None
+
     def make_hex_field(
         self,
         outer = 2.0 * u.deg,
@@ -283,6 +308,7 @@ class RaytracedOpticalModel:
         result = least_squares(
             func,
             x0,
+            x_scale=self.steps[guess.use_dof],
             args=(field, nrad, guess.use_dof, offset),
             **kwargs,
         )
@@ -292,3 +318,54 @@ class RaytracedOpticalModel:
             use_dof=guess.use_dof,
             n_dof=guess.n_dof,
         )
+
+    def zernikes_sensitivity(
+        self,
+        field: FieldCoords,
+        steps: State,
+        jmax: int = 28,
+        rings: int = 10,
+        offset: State | None = None,
+    ) -> np.ndarray:
+        if offset is None:
+            offset = State(
+                value=np.zeros(50, dtype=np.float64),
+                basis="f",
+            )
+        zk0 = self.zernikes(
+            state=offset,
+            field=field,
+            jmax=jmax,
+            rings=rings,
+        )
+
+        zk1s = []
+        for i, step in enumerate(steps.value):  # In current basis
+            dval = np.zeros_like(steps.value)
+            dval[i] = step
+            dstate = State(
+                value=dval,
+                basis=steps.basis,
+                use_dof=steps.use_dof,
+                n_dof=steps.n_dof,
+                Vh=steps.Vh,
+            )
+            zk1 = self.zernikes(
+                state=offset + dstate,
+                field=field,
+                jmax=jmax,
+                rings=rings,
+            )
+            zk1s.append(
+                Zernikes(
+                    coefs=(zk1.coefs - zk0.coefs) / step,
+                    field=field,
+                    R_outer=zk0.R_outer,
+                    R_inner=zk0.R_inner,
+                    wavelength=zk0.wavelength,
+                    jmax=jmax,
+                    frame=zk0.frame,
+                    rtp=zk0.rtp
+                ),
+            )
+        return zk1s
