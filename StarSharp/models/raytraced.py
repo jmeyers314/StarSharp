@@ -16,6 +16,33 @@ SIGMA_TO_FWHM = np.sqrt(np.log(256))
 
 
 class RaytracedOpticalModel:
+    """
+    Ray-traced optical model for the Rubin Observatory LSST camera.
+
+    Wraps a ``batoid_rubin.LSSTBuilder`` to provide wavefront, spot-diagram,
+    and sensitivity computations at arbitrary field positions on the focal
+    plane. All coordinates are in the OCS by default; conversions to other
+    frames are handled by the returned :class:`~StarSharp.datatypes.FieldCoords`,
+    :class:`~StarSharp.datatypes.Zernikes`, and :class:`~StarSharp.datatypes.Spots`
+    objects.
+
+    Parameters
+    ----------
+    builder : LSSTBuilder
+        A ``batoid_rubin.LSSTBuilder`` instance that encodes the telescope
+        design and allows perturbation via AOS DOFs.
+    rtp : Angle
+        Rotator position angle (OCS → CCS rotation).
+    wavelength : Quantity
+        Monochromatic wavelength for ray tracing (e.g. ``620 * u.nm``).
+    camera : Camera or None
+        LSST camera geometry object.  Required for methods that need
+        detector-level information (e.g. :meth:`make_ccd_field`,
+        :meth:`spots`).
+    tqdm : callable or None
+        Progress-bar factory (e.g. ``tqdm.tqdm``).  When provided, a bar
+        is shown during long ray-tracing loops.
+    """
     def __init__(
         self,
         builder: LSSTBuilder,
@@ -56,6 +83,24 @@ class RaytracedOpticalModel:
             self.steps = None
 
     def make_hex_field(self, outer=2.0 * u.deg, nrad=20, naz=None, frame="ocs"):
+        """Create a hexapolar grid of field coordinates.
+
+        Parameters
+        ----------
+        outer : Quantity
+            Outer radius of the hexapolar grid (default: 2 deg).
+        nrad : int
+            Number of radial rings.
+        naz : int or None
+            Number of azimuthal points on the outermost ring.  Defaults to
+            ``int(2π * nrad)``.
+        frame : str
+            Output coordinate frame (default: ``'ocs'``).
+
+        Returns
+        -------
+        FieldCoords
+        """
         if naz is None:
             naz = int(2 * np.pi * nrad)
         thx, thy = batoid.utils.hexapolar(
@@ -78,6 +123,26 @@ class RaytracedOpticalModel:
         types=("E2V", "ITL"),
         detnums: set[int] | None = None,
     ):
+        """Create a field grid with one point per CCD (or per CCD sub-cell).
+
+        Requires ``camera`` to be set on the model.
+
+        Parameters
+        ----------
+        nx : int
+            Number of grid points per axis within each detector (default: 1,
+            i.e. the detector centre).
+        frame : str
+            Output coordinate frame (default: ``'ocs'``).
+        types : tuple[str, ...]
+            Physical detector types to include (default: ``('E2V', 'ITL')``).
+        detnums : set[int] or None
+            Explicit set of detector IDs to include.  Defaults to all detectors.
+
+        Returns
+        -------
+        FieldCoords
+        """
         if self.camera is None:
             raise ValueError("Camera must be set on the model to use this method")
         if detnums is None:
@@ -118,6 +183,24 @@ class RaytracedOpticalModel:
         field: FieldCoords,
         nrad: int = 10,
     ) -> Spots:
+        """Trace rays and return spot diagrams.
+
+        Parameters
+        ----------
+        state : State
+            AOS alignment state (DOF perturbation from the nominal).
+        field : FieldCoords
+            Field coordinates at which to trace.  Any frame or space is
+            accepted; coordinates are converted to OCS angles internally.
+        nrad : int
+            Number of radial rings in the hexapolar stop sampling grid.
+
+        Returns
+        -------
+        Spots
+            Spot diagrams in the CCS frame with focal-plane units (micron).
+            Shape ``(*batch_shape, nfield, nray)``.
+        """
         field = field.angle.ocs
         if not np.allclose(field.rtp, self.rtp):
             raise ValueError(
@@ -204,6 +287,26 @@ class RaytracedOpticalModel:
         jmax: int = 28,
         rings: int = 10,
     ) -> Zernikes:
+        """Compute Zernike wavefront coefficients.
+
+        Parameters
+        ----------
+        state : State
+            AOS alignment state.
+        field : FieldCoords
+            Field coordinates.  Converted to OCS angles internally.
+        jmax : int
+            Maximum Noll index (default: 28).
+        rings : int
+            Number of radial quadrature rings for ``batoid.zernikeGQ``
+            (default: 10).
+
+        Returns
+        -------
+        Zernikes
+            Coefficients in units of microns (OCS frame).
+            Shape ``(*batch_shape, nfield, jmax+1)``.
+        """
         field = field.angle.ocs
         if not np.allclose(field.rtp, self.rtp):
             raise ValueError(
@@ -252,7 +355,6 @@ class RaytracedOpticalModel:
             R_outer=PUPIL_OUTER * u.m,
             R_inner=PUPIL_INNER * u.m,
             wavelength=self.wavelength,
-            jmax=jmax,
             frame="ocs",
             rtp=self.rtp,
         )
@@ -319,6 +421,33 @@ class RaytracedOpticalModel:
         mode: str = "dx",
         **kwargs,
     ) -> State:
+        """Optimise the AOS DOFs to minimise spot size.
+
+        Uses ``scipy.optimize.least_squares`` to find the DOF vector that
+        minimises residual spot positions (``mode='dx'``) or spot size
+        variance (``mode='var'``) across the supplied field.
+
+        Parameters
+        ----------
+        guess : State
+            Initial state; its ``use_dof`` defines which DOFs are free.
+        field : FieldCoords
+            Field coordinates to evaluate.
+        offset : State or None
+            Fixed additive offset applied before optimization.
+        nrad : int
+            Pupil sampling rings passed to :meth:`spots`.
+        mode : str
+            ``'dx'`` (default) minimises raw spot displacements;
+            ``'var'`` minimises per-field spot-size variance.
+        **kwargs
+            Extra keyword arguments forwarded to ``least_squares``.
+
+        Returns
+        -------
+        State
+            Optimised state in the ``'x'`` (active-DOF) basis.
+        """
         from scipy.optimize import least_squares
 
         func = self._optimize_dx_func if mode == "dx" else self._optimize_func
@@ -346,6 +475,31 @@ class RaytracedOpticalModel:
         rings: int = 10,
         offset: State | None = None,
     ) -> Sensitivity:
+        """Compute the Zernike wavefront sensitivity matrix via finite differences.
+
+        For each DOF in *steps*, perturbs the alignment state by the
+        corresponding step size and records
+        ``(zernikes(offset + step) - zernikes(offset)) / step``.
+
+        Parameters
+        ----------
+        field : FieldCoords
+            Field coordinates at which to evaluate the sensitivity.
+        steps : State
+            Step sizes in the desired DOF basis.  Its ``basis`` and
+            ``use_dof`` define which DOFs are included.
+        jmax : int
+            Maximum Noll index (default: 28).
+        rings : int
+            Quadrature rings for :meth:`zernikes` (default: 10).
+        offset : State or None
+            Nominal (unperturbed) alignment state.  Defaults to zeros.
+
+        Returns
+        -------
+        Sensitivity[Zernikes]
+            Gradient shape ``(ndof, nfield, jmax+1)``.
+        """
         if offset is None:
             offset = State(
                 value=np.zeros(50, dtype=np.float64),
@@ -386,6 +540,27 @@ class RaytracedOpticalModel:
         nrad: int = 10,
         offset: State | None = None,
     ) -> Sensitivity:
+        """Compute the spot-diagram sensitivity matrix via finite differences.
+
+        For each DOF in *steps*, perturbs the alignment state and records
+        ``(spots(offset + step) - spots(offset)) / step`` for ``dx`` and ``dy``.
+
+        Parameters
+        ----------
+        field : FieldCoords
+            Field coordinates.
+        steps : State
+            Per-DOF step sizes.
+        nrad : int
+            Pupil sampling rings for :meth:`spots` (default: 10).
+        offset : State or None
+            Nominal alignment state.  Defaults to zeros.
+
+        Returns
+        -------
+        Sensitivity[Spots]
+            Gradient shape ``(ndof, nfield, nray)`` for ``dx`` and ``dy``.
+        """
         if offset is None:
             offset = State(
                 value=np.zeros(50, dtype=np.float64),
@@ -428,6 +603,36 @@ class RaytracedOpticalModel:
         rings: int = 10,
         offset: State | None = None,
     ) -> Sensitivity:
+        """Compute the double-Zernike sensitivity matrix via finite differences.
+
+        Internally calls :meth:`zernikes_sensitivity` and then projects each
+        per-field Zernike result into the double-Zernike (field × pupil)
+        basis via :meth:`~StarSharp.datatypes.Zernikes.double`.
+
+        Parameters
+        ----------
+        field : FieldCoords
+            Field sampling used for the Zernike computation.
+        steps : State
+            Per-DOF step sizes.
+        kmax : int
+            Maximum field Noll index for the double-Zernike fit (default: 28).
+        field_outer : Quantity
+            Outer field radius for the field-Zernike basis.  Required.
+        field_inner : Quantity or None
+            Inner field radius.  Defaults to zero.
+        jmax : int
+            Maximum pupil Noll index (default: 28).
+        rings : int
+            Quadrature rings for the underlying :meth:`zernikes` call.
+        offset : State or None
+            Nominal alignment state.  Defaults to zeros.
+
+        Returns
+        -------
+        Sensitivity[DoubleZernikes]
+            Gradient shape ``(ndof, kmax+1, jmax+1)``.
+        """
         zk_sens = self.zernikes_sensitivity(
             field=field,
             steps=steps,
