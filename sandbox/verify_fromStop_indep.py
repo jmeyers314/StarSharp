@@ -30,7 +30,7 @@ model = RaytracedOpticalModel(
 sf = StateFactory(50)
 nominal_state = sf.from_f([0]*50)
 steps = sf.from_f(model.steps)
-field = model.make_ccd_field(nx=1, detnums=np.linspace(4, 189, 9))
+field = model.make_ccd_field(nx=1, detnums=np.arange(4, 189, 9))
 
 nominal_sp = model.spots(state=nominal_state, field=field)
 for i in trange(50):
