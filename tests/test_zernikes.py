@@ -41,10 +41,10 @@ class TestZernikesConstruction:
         assert zk.jmax == 15
         assert zk.coefs.shape[-1] == 16
 
-    def test_jmax_explicit(self):
+    def test_jmax_inferred_from_shape(self):
         coefs = np.zeros(23) * u.um
         field = _make_field(1)
-        zk = Zernikes(coefs=coefs, field=field, jmax=22)
+        zk = Zernikes(coefs=coefs, field=field)
         assert zk.jmax == 22
 
     def test_scalar_coefs_promoted(self):

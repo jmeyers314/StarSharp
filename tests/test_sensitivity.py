@@ -43,7 +43,6 @@ def _make_zernikes_nominal(rng=None):
         field=field,
         R_outer=PUPIL_OUTER,
         R_inner=PUPIL_INNER,
-        jmax=JMAX,
         frame="ocs",
         rtp=RTP,
     )
@@ -57,7 +56,6 @@ def _make_zernikes_perturbed(nominal, rng, step):
         field=nominal.field,
         R_outer=nominal.R_outer,
         R_inner=nominal.R_inner,
-        jmax=nominal.jmax,
         frame=nominal.frame,
         rtp=nominal.rtp,
     )
@@ -134,8 +132,6 @@ def _make_dz_nominal(rng=None):
         field_inner=FIELD_INNER,
         pupil_outer=PUPIL_OUTER,
         pupil_inner=PUPIL_INNER,
-        jmax=JMAX,
-        kmax=KMAX,
         frame="ocs",
         rtp=RTP,
     )
@@ -149,8 +145,6 @@ def _make_dz_perturbed(nominal, rng, step):
         field_inner=nominal.field_inner,
         pupil_outer=nominal.pupil_outer,
         pupil_inner=nominal.pupil_inner,
-        jmax=nominal.jmax,
-        kmax=nominal.kmax,
         frame=nominal.frame,
         rtp=nominal.rtp,
     )

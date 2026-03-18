@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import galsim
 import numpy as np
@@ -20,18 +20,22 @@ class DoubleZernikes:
     field_inner: Quantity
     pupil_outer: Quantity
     pupil_inner: Quantity
-    jmax: int | None = None
-    kmax: int | None = None
     wavelength: Quantity | None = None
     frame: str = "ocs" # Applies to both field and pupil coordinates
     rtp: Angle | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "coefs", np.atleast_2d(self.coefs))
-        if self.jmax is None:
-            object.__setattr__(self, "jmax", self.coefs.shape[-1] - 1)
-        if self.kmax is None:
-            object.__setattr__(self, "kmax", self.coefs.shape[-2] - 1)
+
+    @property
+    def jmax(self) -> int:
+        """Maximum pupil Noll index, inferred from coefs shape."""
+        return self.coefs.shape[-1] - 1
+
+    @property
+    def kmax(self) -> int:
+        """Maximum field Noll index, inferred from coefs shape."""
+        return self.coefs.shape[-2] - 1
 
     @property
     def eps(self) -> Quantity:
@@ -53,18 +57,7 @@ class DoubleZernikes:
         return self.coefs.shape[0]
 
     def __getitem__(self, idx: int | slice) -> DoubleZernikes:
-        return DoubleZernikes(
-            coefs=self.coefs[idx],
-            field_outer=self.field_outer,
-            field_inner=self.field_inner,
-            pupil_outer=self.pupil_outer,
-            pupil_inner=self.pupil_inner,
-            jmax=self.jmax,
-            kmax=self.kmax,
-            wavelength=self.wavelength,
-            frame=self.frame,
-            rtp=self.rtp,
-        )
+        return replace(self, coefs=self.coefs[idx])
 
     def _rot(self, angle: Angle, frame: str) -> DoubleZernikes:
         """Return a new DoubleZernikes with the coefficients rotated by *angle*."""
@@ -75,18 +68,7 @@ class DoubleZernikes:
             "lk,...kj,jm->...lm", krot, self.coefs, jrot
         )
 
-        return DoubleZernikes(
-            coefs=coefs_rot,
-            field_outer=self.field_outer,
-            field_inner=self.field_inner,
-            pupil_outer=self.pupil_outer,
-            pupil_inner=self.pupil_inner,
-            jmax=self.jmax,
-            kmax=self.kmax,
-            wavelength=self.wavelength,
-            frame=frame,
-            rtp=self.rtp,
-        )
+        return replace(self, coefs=coefs_rot, frame=frame)
 
     @property
     def ocs(self) -> DoubleZernikes:
@@ -145,7 +127,6 @@ class DoubleZernikes:
             R_outer=self.pupil_outer,
             R_inner=self.pupil_inner,
             wavelength=self.wavelength,
-            jmax=self.jmax,
             frame=self.frame,
             rtp=self.rtp,
         )

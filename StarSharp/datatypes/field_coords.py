@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from batoid_rubin import LSSTBuilder
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from astropy.units import Quantity
 from astropy.coordinates import Angle
 import numpy as np
@@ -126,14 +126,7 @@ class FieldCoords:
         """Return a new FieldCoords with x/y rotated by *angle*."""
         rx = self.x * np.cos(angle) + self.y * np.sin(angle)
         ry = -self.x * np.sin(angle) + self.y * np.cos(angle)
-        return FieldCoords(
-            x=rx,
-            y=ry,
-            frame=frame,
-            rtp=self.rtp,
-            wcs=self.wcs,
-            camera=self.camera,
-        )
+        return replace(self, x=rx, y=ry, frame=frame)
 
     @property
     def ocs(self) -> FieldCoords:
@@ -155,14 +148,7 @@ class FieldCoords:
         y = self.y
         if self.frame == "dvcs":
             x, y = y, x
-        return FieldCoords(
-            x=x,
-            y=y,
-            frame="ccs",
-            rtp=self.rtp,
-            wcs=self.wcs,
-            camera=self.camera,
-        )
+        return replace(self, x=x, y=y, frame="ccs")
 
     @property
     def edcs(self) -> FieldCoords:
@@ -170,14 +156,7 @@ class FieldCoords:
         if self.frame == "edcs":
             return self
         ccs = self.ccs
-        return FieldCoords(
-            x=ccs.x,
-            y=ccs.y,
-            frame="edcs",
-            rtp=ccs.rtp,
-            wcs=ccs.wcs,
-            camera=ccs.camera,
-        )
+        return replace(ccs, frame="edcs")
 
     @property
     def dvcs(self) -> FieldCoords:
@@ -185,14 +164,7 @@ class FieldCoords:
         if self.frame == "dvcs":
             return self
         ccs = self.ccs
-        return FieldCoords(
-            x=ccs.y,
-            y=ccs.x,
-            frame="dvcs",
-            rtp=ccs.rtp,
-            wcs=ccs.wcs,
-            camera=ccs.camera,
-        )
+        return replace(ccs, x=ccs.y, y=ccs.x, frame="dvcs")
 
     @property
     def nfield(self) -> int:
@@ -221,14 +193,7 @@ class FieldCoords:
         fpx, fpy = wcs.toImage(*args, **kwargs)
         fpx = fpx.reshape(orig_shape)
         fpy = fpy.reshape(orig_shape)
-        fp_ccs = FieldCoords(
-            x=fpx << u.mm,
-            y=fpy << u.mm,
-            frame="ccs",
-            rtp=self.rtp,
-            wcs=self.wcs,
-            camera=self.camera,
-        )
+        fp_ccs = replace(self, x=fpx << u.mm, y=fpy << u.mm, frame="ccs")
         return getattr(fp_ccs, self.frame)
 
     @property
@@ -252,14 +217,7 @@ class FieldCoords:
         fy[fy > np.pi] -= 2 * np.pi
         fx = fx.reshape(orig_shape)
         fy = fy.reshape(orig_shape)
-        field_ocs = FieldCoords(
-            x=fx << u.radian,
-            y=fy << u.radian,
-            frame="ocs",
-            rtp=self.rtp,
-            wcs=self.wcs,
-            camera=self.camera,
-        )
+        field_ocs = replace(self, x=fx << u.radian, y=fy << u.radian, frame="ocs")
         return getattr(field_ocs, self.frame)
 
     @property
@@ -285,14 +243,7 @@ class FieldCoords:
         return self.x.shape[0]
 
     def __getitem__(self, idx) -> FieldCoords:
-        return FieldCoords(
-            x=self.x[idx],
-            y=self.y[idx],
-            frame=self.frame,
-            rtp=self.rtp,
-            wcs=self.wcs,
-            camera=self.camera,
-        )
+        return replace(self, x=self.x[idx], y=self.y[idx])
 
     def __repr__(self) -> str:
         return f"FieldCoords({self.x!r}, {self.y!r}, frame={self.frame!r})"

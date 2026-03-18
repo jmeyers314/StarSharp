@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import astropy.units as u
 import galsim
@@ -74,16 +74,7 @@ class Spots:
         return self.dx.shape[0]
 
     def __getitem__(self, idx) -> Spots:
-        return Spots(
-            dx=self.dx[idx],
-            dy=self.dy[idx],
-            field=self.field[idx],
-            vignetted=self.vignetted[idx],
-            wavelength=self.wavelength,
-            frame=self.frame,
-            rtp=self.rtp,
-            wcs=self.wcs,
-        )
+        return replace(self, dx=self.dx[idx], dy=self.dy[idx], vignetted=self.vignetted[idx], field=self.field[idx])
 
     def _require(self, name: str):
         """Return the instance attribute or raise if not set."""
@@ -118,16 +109,7 @@ class Spots:
         """Return a new Spots with dx/dy rotated by *angle*."""
         rdx = self.dx * np.cos(angle) + self.dy * np.sin(angle)
         rdy = -self.dx * np.sin(angle) + self.dy * np.cos(angle)
-        return Spots(
-            dx=rdx,
-            dy=rdy,
-            vignetted=self.vignetted,
-            field=self.field,
-            wavelength=self.wavelength,
-            frame=frame,
-            rtp=self.rtp,
-            wcs=self.wcs,
-        )
+        return replace(self, dx=rdx, dy=rdy, frame=frame)
 
     @property
     def ocs(self) -> Spots:
@@ -149,16 +131,7 @@ class Spots:
         dy = self.dy
         if self.frame == "dvcs":
             dx, dy = dy, dx
-        return Spots(
-            dx=dx,
-            dy=dy,
-            vignetted=self.vignetted,
-            field=self.field,
-            wavelength=self.wavelength,
-            frame="ccs",
-            rtp=self.rtp,
-            wcs=self.wcs,
-        )
+        return replace(self, dx=dx, dy=dy, frame="ccs")
 
     @property
     def edcs(self) -> Spots:
@@ -166,16 +139,7 @@ class Spots:
         if self.frame == "edcs":
             return self
         ccs = self.ccs
-        return Spots(
-            dx=ccs.dx,
-            dy=ccs.dy,
-            vignetted=ccs.vignetted,
-            field=ccs.field,
-            wavelength=ccs.wavelength,
-            frame="edcs",
-            rtp=ccs.rtp,
-            wcs=ccs.wcs,
-        )
+        return replace(ccs, frame="edcs")
 
     @property
     def dvcs(self) -> Spots:
@@ -183,16 +147,7 @@ class Spots:
         if self.frame == "dvcs":
             return self
         ccs = self.ccs
-        return Spots(
-            dx=ccs.dy,
-            dy=ccs.dx,
-            vignetted=ccs.vignetted,
-            field=ccs.field,
-            wavelength=ccs.wavelength,
-            frame="dvcs",
-            rtp=ccs.rtp,
-            wcs=ccs.wcs,
-        )
+        return replace(ccs, dx=ccs.dy, dy=ccs.dx, frame="dvcs")
 
     @property
     def focal_plane(self) -> Spots:
@@ -216,16 +171,7 @@ class Spots:
         sfpx -= cfx[..., np.newaxis]
         sfpy -= cfy[..., np.newaxis]
 
-        fp_ccs = Spots(
-            dx=sfpx << u.mm,
-            dy=sfpy << u.mm,
-            vignetted=self.vignetted,
-            field=self.field.focal_plane,
-            wavelength=self.wavelength,
-            frame="ccs",
-            rtp=self.rtp,
-            wcs=self.wcs,
-        )
+        fp_ccs = replace(self, dx=sfpx << u.mm, dy=sfpy << u.mm, field=self.field.focal_plane, frame="ccs")
         return getattr(fp_ccs, self.frame)
 
     @property
@@ -251,16 +197,7 @@ class Spots:
         sfx -= fax[..., np.newaxis]
         sfy -= fay[..., np.newaxis]
 
-        field_ocs = Spots(
-            dx=sfx << u.radian,
-            dy=sfy << u.radian,
-            vignetted=self.vignetted,
-            field=self.field.angle.ocs,
-            wavelength=self.wavelength,
-            frame="ocs",
-            rtp=self.rtp,
-            wcs=self.wcs,
-        )
+        field_ocs = replace(self, dx=sfx << u.radian, dy=sfy << u.radian, field=self.field.angle.ocs, frame="ocs")
         return getattr(field_ocs, self.frame)
 
     def __repr__(self) -> str:

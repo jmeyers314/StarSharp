@@ -40,8 +40,6 @@ def _make_dz(
         field_inner=FIELD_INNER,
         pupil_outer=PUPIL_OUTER,
         pupil_inner=PUPIL_INNER,
-        jmax=jmax,
-        kmax=kmax,
         frame=frame,
         rtp=rtp,
     )
@@ -241,7 +239,6 @@ class TestDoubleZernikesFrameRotation:
             R_outer=PUPIL_OUTER,
             R_inner=PUPIL_INNER,
             wavelength=dz.wavelength,
-            jmax=dz.jmax,
             frame=dz.frame,
             rtp=dz.rtp,
         )

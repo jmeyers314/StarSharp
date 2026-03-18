@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import astropy.units as u
 import galsim
@@ -39,14 +39,11 @@ class Zernikes:
     R_outer: Quantity = None
     R_inner: Quantity = None
     wavelength: Quantity | None = None
-    jmax: int | None = None
     frame: str = "ocs"
     rtp: Angle | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "coefs", np.atleast_2d(self.coefs))
-        if self.jmax is None:
-            object.__setattr__(self, "jmax", self.coefs.shape[-1] - 1)
         if (
             self.rtp is not None
             and self.field.rtp is not None
@@ -70,6 +67,11 @@ class Zernikes:
         return self.coefs.shape[:-2]
 
     @property
+    def jmax(self) -> int:
+        """Maximum Noll index, inferred from coefs shape."""
+        return self.coefs.shape[-1] - 1
+
+    @property
     def eps(self) -> float:
         """Obscuration ratio R_inner / R_outer."""
         return (self.R_inner / self.R_outer).value
@@ -78,16 +80,7 @@ class Zernikes:
         return self.coefs.shape[0]
 
     def __getitem__(self, idx) -> Zernikes:
-        return Zernikes(
-            coefs=self.coefs[idx],
-            field=self.field[idx],
-            R_outer=self.R_outer,
-            R_inner=self.R_inner,
-            wavelength=self.wavelength,
-            jmax=self.jmax,
-            frame=self.frame,
-            rtp=self.rtp,
-        )
+        return replace(self, coefs=self.coefs[idx], field=self.field[idx])
 
     def _require(self, name: str):
         """Return the instance attribute or raise if not set."""
@@ -100,16 +93,7 @@ class Zernikes:
         """Return a new Zernikes with the coefficients rotated by *angle*."""
         rot = galsim.zernike.zernikeRotMatrix(self.jmax, angle.radian)
         coefs_rot = self.coefs @ rot
-        return Zernikes(
-            coefs=coefs_rot,
-            field=self.field,
-            R_outer=self.R_outer,
-            R_inner=self.R_inner,
-            wavelength=self.wavelength,
-            jmax=self.jmax,
-            frame=frame,
-            rtp=self.rtp,
-        )
+        return replace(self, coefs=coefs_rot, frame=frame)
 
     @property
     def ocs(self) -> Zernikes:
@@ -191,8 +175,6 @@ class Zernikes:
             field_inner=field_inner,
             pupil_outer=R_outer,
             pupil_inner=R_inner,
-            jmax=self.jmax,
-            kmax=kmax,
             wavelength=self.wavelength,
             frame=self.frame,
             rtp=self.rtp,
