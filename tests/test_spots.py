@@ -163,6 +163,70 @@ class TestSpotsSlicing:
             sp.dx = 0 * u.um
 
 
+class TestSpotsPupilCoords:
+    """Tests for the optional px/py pupil coordinate fields."""
+
+    def _make_spots_with_pupil(self, n_field=3, n_ray=50):
+        rng = np.random.default_rng(12)
+        dx = rng.normal(size=(n_field, n_ray)) * u.um
+        dy = rng.normal(size=(n_field, n_ray)) * u.um
+        vig = np.zeros((n_field, n_ray), dtype=bool)
+        field = _make_field(n_field, rtp=RTP)
+        px = np.linspace(-4.0, 4.0, n_ray) * u.m
+        py = np.linspace(-4.0, 4.0, n_ray) * u.m
+        return Spots(
+            dx=dx, dy=dy, vignetted=vig, field=field,
+            frame="ccs", rtp=RTP, px=px, py=py,
+        )
+
+    def test_default_none(self):
+        sp = _make_spots(rtp=RTP)
+        assert sp.px is None
+        assert sp.py is None
+
+    def test_stored_when_provided(self):
+        sp = self._make_spots_with_pupil()
+        assert sp.px is not None
+        assert sp.py is not None
+        assert sp.px.shape == (50,)
+        assert sp.py.unit == u.m
+
+    def test_preserved_on_getitem_int(self):
+        sp = self._make_spots_with_pupil(n_field=5)
+        s = sp[2]
+        np.testing.assert_array_equal(s.px, sp.px)
+        np.testing.assert_array_equal(s.py, sp.py)
+
+    def test_preserved_on_getitem_slice(self):
+        sp = self._make_spots_with_pupil(n_field=5)
+        s = sp[1:4]
+        np.testing.assert_array_equal(s.px, sp.px)
+        np.testing.assert_array_equal(s.py, sp.py)
+
+    def test_preserved_on_frame_rotation(self):
+        sp = self._make_spots_with_pupil()
+        rotated = sp.ocs
+        np.testing.assert_array_equal(rotated.px, sp.px)
+        np.testing.assert_array_equal(rotated.py, sp.py)
+
+    def test_preserved_on_space_conversion(self):
+        wcs = _make_wcs(rtp=RTP)
+        rng = np.random.default_rng(12)
+        n_field, n_ray = 3, 50
+        dx = rng.normal(size=(n_field, n_ray)) * u.um
+        dy = rng.normal(size=(n_field, n_ray)) * u.um
+        vig = np.zeros((n_field, n_ray), dtype=bool)
+        field = _make_field(n_field, rtp=RTP, wcs=wcs)
+        px = np.linspace(-4.0, 4.0, n_ray) * u.m
+        py = np.linspace(-4.0, 4.0, n_ray) * u.m
+        sp = Spots(
+            dx=dx, dy=dy, vignetted=vig, field=field,
+            frame="ccs", rtp=RTP, wcs=wcs, px=px, py=py,
+        )
+        converted = sp.angle
+        np.testing.assert_array_equal(converted.px, sp.px)
+        np.testing.assert_array_equal(converted.py, sp.py)
+
 class TestSpotsComputeMoments:
     def test_returns_moments_instance(self):
         sp = _make_spots_single()

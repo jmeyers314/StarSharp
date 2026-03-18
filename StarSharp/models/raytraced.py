@@ -278,6 +278,8 @@ class RaytracedOpticalModel:
             wavelength=self.wavelength,
             frame="ccs",
             rtp=self.rtp,
+            px=np.array(px) << u.m,
+            py=np.array(py) << u.m,
         )
 
     def zernikes(

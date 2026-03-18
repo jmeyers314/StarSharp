@@ -38,6 +38,10 @@ class Spots:
         (camera).
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
+    px, py : Quantity or None
+        Pupil (stop-plane) coordinates of each ray.  1-D arrays of shape
+        ``(n_ray,)`` shared across all field points.  Units are typically
+        metres.
     """
 
     dx: Quantity
@@ -48,6 +52,8 @@ class Spots:
     frame: str = "ccs"
     rtp: Angle | None = None
     wcs: BaseWCS | None = None
+    px: Quantity | None = None
+    py: Quantity | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dx", np.atleast_2d(self.dx))
