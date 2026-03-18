@@ -1,4 +1,5 @@
 """Shared test helpers for the StarSharp.datatypes test suite."""
+
 from __future__ import annotations
 
 import astropy.units as u
@@ -67,8 +68,8 @@ def _make_spots_single(n_ray: int = 200, rtp: Angle = RTP) -> Spots:
     dx = rng.normal(size=n_ray) * u.micron
     dy = rng.normal(0.5, 1.5, size=n_ray) * u.micron
     vig = np.zeros(n_ray, dtype=bool)
-    field = FieldCoords(x=0.5 * u.deg, y=-0.3 * u.deg, frame='ocs', rtp=rtp)
-    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame='ccs', rtp=rtp)
+    field = FieldCoords(x=0.5 * u.deg, y=-0.3 * u.deg, frame="ocs", rtp=rtp)
+    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame="ccs", rtp=rtp)
 
 
 def _make_spots_batched(n_field: int = 4, n_ray: int = 200, rtp: Angle = RTP) -> Spots:
@@ -80,6 +81,7 @@ def _make_spots_batched(n_field: int = 4, n_ray: int = 200, rtp: Angle = RTP) ->
     field = FieldCoords(
         x=rng.uniform(-1, 1, n_field) * u.deg,
         y=rng.uniform(-1, 1, n_field) * u.deg,
-        frame='ocs', rtp=rtp,
+        frame="ocs",
+        rtp=rtp,
     )
-    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame='ccs', rtp=rtp)
+    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame="ccs", rtp=rtp)

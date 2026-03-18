@@ -4,8 +4,8 @@ from dataclasses import dataclass, replace
 
 import galsim
 import numpy as np
-from astropy.units import Quantity
 from astropy.coordinates import Angle
+from astropy.units import Quantity
 
 from .field_coords import FieldCoords
 from .zernikes import Zernikes
@@ -13,7 +13,7 @@ from .zernikes import Zernikes
 
 @dataclass(frozen=True)
 class DoubleZernikes:
-    _sensitivity_fields = ('coefs',)
+    _sensitivity_fields = ("coefs",)
 
     coefs: Quantity
     field_outer: Quantity
@@ -21,7 +21,7 @@ class DoubleZernikes:
     pupil_outer: Quantity
     pupil_inner: Quantity
     wavelength: Quantity | None = None
-    frame: str = "ocs" # Applies to both field and pupil coordinates
+    frame: str = "ocs"  # Applies to both field and pupil coordinates
     rtp: Angle | None = None
 
     def __post_init__(self):
@@ -50,7 +50,9 @@ class DoubleZernikes:
         """Return the instance attribute or raise if not set."""
         val = getattr(self, name)
         if val is None:
-            raise ValueError(f"{name} must be set on the DoubleZernikes to use this property")
+            raise ValueError(
+                f"{name} must be set on the DoubleZernikes to use this property"
+            )
         return val
 
     def __len__(self) -> int:
@@ -64,9 +66,7 @@ class DoubleZernikes:
         jrot = galsim.zernike.zernikeRotMatrix(self.jmax, angle.radian)
         krot = galsim.zernike.zernikeRotMatrix(self.kmax, angle.radian)
 
-        coefs_rot = np.einsum(
-            "lk,...kj,jm->...lm", krot, self.coefs, jrot
-        )
+        coefs_rot = np.einsum("lk,...kj,jm->...lm", krot, self.coefs, jrot)
 
         return replace(self, coefs=coefs_rot, frame=frame)
 
@@ -115,7 +115,8 @@ class DoubleZernikes:
         # Field Zernike basis: (kmax+1, nfield) -> transpose to (nfield, kmax+1)
         B = galsim.zernike.zernikeBasis(
             self.kmax,
-            field.x.value, field.y.value,
+            field.x.value,
+            field.y.value,
             R_outer=self.field_outer.to_value(field.x.unit),
             R_inner=self.field_inner.to_value(field.x.unit),
         ).T

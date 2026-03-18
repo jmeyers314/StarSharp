@@ -16,8 +16,8 @@ from .field_coords import FieldCoords
 @dataclass(frozen=True)
 class Spots:
     VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
-    _sensitivity_fields = ('dx', 'dy')
-    _broadcast_fields = ('vignetted',)
+    _sensitivity_fields = ("dx", "dy")
+    _broadcast_fields = ("vignetted",)
     """Spot diagrams: ray intersection positions on the focal plane.
 
     May represent one or many field points.  When batched,
@@ -57,7 +57,9 @@ class Spots:
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
         if frame not in self.VALID_FRAMES:
-            raise ValueError(f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}")
+            raise ValueError(
+                f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}"
+            )
         if (
             self.rtp is not None
             and self.field.rtp is not None
@@ -74,7 +76,13 @@ class Spots:
         return self.dx.shape[0]
 
     def __getitem__(self, idx) -> Spots:
-        return replace(self, dx=self.dx[idx], dy=self.dy[idx], vignetted=self.vignetted[idx], field=self.field[idx])
+        return replace(
+            self,
+            dx=self.dx[idx],
+            dy=self.dy[idx],
+            vignetted=self.vignetted[idx],
+            field=self.field[idx],
+        )
 
     def _require(self, name: str):
         """Return the instance attribute or raise if not set."""
@@ -171,7 +179,13 @@ class Spots:
         sfpx -= cfx[..., np.newaxis]
         sfpy -= cfy[..., np.newaxis]
 
-        fp_ccs = replace(self, dx=sfpx << u.mm, dy=sfpy << u.mm, field=self.field.focal_plane, frame="ccs")
+        fp_ccs = replace(
+            self,
+            dx=sfpx << u.mm,
+            dy=sfpy << u.mm,
+            field=self.field.focal_plane,
+            frame="ccs",
+        )
         return getattr(fp_ccs, self.frame)
 
     @property
@@ -197,7 +211,13 @@ class Spots:
         sfx -= fax[..., np.newaxis]
         sfy -= fay[..., np.newaxis]
 
-        field_ocs = replace(self, dx=sfx << u.radian, dy=sfy << u.radian, field=self.field.angle.ocs, frame="ocs")
+        field_ocs = replace(
+            self,
+            dx=sfx << u.radian,
+            dy=sfy << u.radian,
+            field=self.field.angle.ocs,
+            frame="ocs",
+        )
         return getattr(field_ocs, self.frame)
 
     def __repr__(self) -> str:
@@ -235,9 +255,6 @@ class Spots:
         for ny in range(order + 1):
             nx = order - ny
             name = "x" * nx + "y" * ny
-            vals[name] = np.nanmean(
-                dx ** nx * dy ** ny,
-                axis=-1
-            ) << (u.micron ** order)
+            vals[name] = np.nanmean(dx**nx * dy**ny, axis=-1) << (u.micron**order)
 
         return Moments[order](**vals, frame=self.frame, field=self.field, rtp=self.rtp)

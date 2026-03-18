@@ -1,4 +1,5 @@
 """Tests for DoubleZernikes."""
+
 from __future__ import annotations
 
 import astropy.units as u
@@ -8,8 +9,8 @@ import pytest
 from astropy.coordinates import Angle
 
 from StarSharp.datatypes import DoubleZernikes
-from .utils import RTP
 
+from .utils import RTP
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,6 +49,7 @@ def _make_dz(
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
+
 
 class TestDoubleZernikesConstruction:
     def test_jmax_kmax_inferred(self):
@@ -104,6 +106,7 @@ class TestDoubleZernikesConstruction:
 # batch_shape and __len__
 # ---------------------------------------------------------------------------
 
+
 class TestDoubleZernikesShape:
     def test_batch_shape_unbatched(self):
         dz = _make_dz(kmax=6, jmax=10)
@@ -133,6 +136,7 @@ class TestDoubleZernikesShape:
 # __getitem__
 # ---------------------------------------------------------------------------
 
+
 class TestDoubleZernikesGetitem:
     def test_getitem_int_batch(self):
         dz = _make_dz(kmax=6, jmax=10, batch_shape=(4,))
@@ -158,6 +162,7 @@ class TestDoubleZernikesGetitem:
 # ---------------------------------------------------------------------------
 # Frame rotation (ocs / ccs)
 # ---------------------------------------------------------------------------
+
 
 class TestDoubleZernikesFrameRotation:
     def test_ocs_noop(self):
@@ -230,12 +235,12 @@ class TestDoubleZernikesFrameRotation:
 
     def test_rotation_against_single_zernikes(self):
         """Test that the rotation of the k=0 (field-independent) modes matches the Zernikes rotation."""
-        from StarSharp.datatypes import Zernikes, FieldCoords
+        from StarSharp.datatypes import FieldCoords, Zernikes
 
         dz = _make_dz(kmax=1, jmax=10, frame="ocs", rtp=RTP)
         zk = Zernikes(
             coefs=dz.coefs[0],
-            field=FieldCoords(0.0*u.deg, 0.0*u.deg, frame="ocs", rtp=RTP),
+            field=FieldCoords(0.0 * u.deg, 0.0 * u.deg, frame="ocs", rtp=RTP),
             R_outer=PUPIL_OUTER,
             R_inner=PUPIL_INNER,
             wavelength=dz.wavelength,
@@ -250,9 +255,10 @@ class TestDoubleZernikesFrameRotation:
             atol=1e-12,
         )
 
+
 class TestDoubleZernikesSingleZernikes:
     def test_double_single_double_roundtrip(self):
-        from StarSharp.datatypes import Zernikes, FieldCoords
+        from StarSharp.datatypes import FieldCoords, Zernikes
 
         dz = _make_dz(kmax=3, jmax=11, frame="ocs", rtp=RTP)
         x = np.linspace(0.5, -0.5, 11) * u.deg
@@ -268,7 +274,7 @@ class TestDoubleZernikesSingleZernikes:
         )
 
     def test_batched_double_single_double_roundtrip(self):
-        from StarSharp.datatypes import Zernikes, FieldCoords
+        from StarSharp.datatypes import FieldCoords, Zernikes
 
         dz = _make_dz(kmax=3, jmax=11, frame="ocs", rtp=RTP, batch_shape=(2, 3))
         x = np.linspace(0.5, -0.5, 11) * u.deg
@@ -283,9 +289,11 @@ class TestDoubleZernikesSingleZernikes:
             rt.coefs.to_value(u.um), dz.coefs.to_value(u.um), atol=1e-12
         )
 
+
 # ---------------------------------------------------------------------------
 # to_galsim
 # ---------------------------------------------------------------------------
+
 
 class TestDoubleZernikesToGalsim:
     def test_returns_galsim_object(self):

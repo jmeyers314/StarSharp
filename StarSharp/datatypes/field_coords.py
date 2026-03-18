@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-from batoid_rubin import LSSTBuilder
 from dataclasses import dataclass, replace
-from astropy.units import Quantity
-from astropy.coordinates import Angle
-import numpy as np
-from numpy.typing import NDArray
-from galsim.wcs import BaseWCS, CelestialWCS
-from galsim.fitswcs import FittedSIPWCS
-import batoid
-from lsst.afw.cameraGeom import Camera, FOCAL_PLANE
-import galsim
+
 import astropy.units as u
-
-
+import batoid
+import galsim
+import numpy as np
+from astropy.coordinates import Angle
+from astropy.units import Quantity
+from batoid_rubin import LSSTBuilder
+from galsim.fitswcs import FittedSIPWCS
+from galsim.wcs import BaseWCS, CelestialWCS
+from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
+from numpy.typing import NDArray
 
 
 @dataclass(frozen=True)
@@ -40,7 +39,6 @@ class FieldCoords:
         ``detnum`` property.
     """
 
-
     VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
 
     x: Quantity
@@ -63,7 +61,9 @@ class FieldCoords:
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
         if frame not in self.VALID_FRAMES:
-            raise ValueError(f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}")
+            raise ValueError(
+                f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}"
+            )
         if not (self.x.unit.physical_type == self.y.unit.physical_type):
             raise ValueError(
                 f"x and y must have compatible units, "

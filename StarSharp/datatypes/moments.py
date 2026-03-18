@@ -41,18 +41,22 @@ class Moments:
 
     def __post_init__(self):
         # Coerce frame to lower case and validate
-        if hasattr(self, 'frame') and isinstance(self.frame, str):
-            object.__setattr__(self, 'frame', self.frame.lower())
-        if hasattr(self, 'frame') and self.frame not in self.VALID_FRAMES:
-            raise ValueError(f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}")
+        if hasattr(self, "frame") and isinstance(self.frame, str):
+            object.__setattr__(self, "frame", self.frame.lower())
+        if hasattr(self, "frame") and self.frame not in self.VALID_FRAMES:
+            raise ValueError(
+                f"frame must be one of {self.VALID_FRAMES}, got {self.frame!r}"
+            )
 
     @classmethod
     def specialize(cls, order: int):
         """Decorator to register a specialized implementation for an order."""
+
         def deco(subcls: type):
             cls._specialized[order] = subcls
             cls._cache[order] = subcls
             return subcls
+
         return deco
 
     @classmethod
@@ -61,21 +65,20 @@ class Moments:
             return cls._specialized[order]
         if order not in cls._cache:
             moment_names = [
-                ''.join(p)
-                for p in itertools.combinations_with_replacement('xy', order)
+                "".join(p) for p in itertools.combinations_with_replacement("xy", order)
             ]
             moment_fields = [(f, Quantity) for f in moment_names]
             meta_fields = [
-                ('frame', str, dataclasses.field(default='ocs')),
-                ('field', FieldCoords | None, dataclasses.field(default=None)),
-                ('rtp', Angle | None, dataclasses.field(default=None)),
+                ("frame", str, dataclasses.field(default="ocs")),
+                ("field", FieldCoords | None, dataclasses.field(default=None)),
+                ("rtp", Angle | None, dataclasses.field(default=None)),
             ]
             cls._cache[order] = make_dataclass(
                 f"Moments{order}",
                 moment_fields + meta_fields,
                 bases=(cls,),
                 frozen=True,
-                namespace={'_moment_order': order},
+                namespace={"_moment_order": order},
             )
         return cls._cache[order]
 
@@ -83,20 +86,18 @@ class Moments:
         """Return the instance attribute or raise if not set."""
         val = getattr(self, name)
         if val is None:
-            raise ValueError(
-                f"{name} must be set on the Moments to use this property"
-            )
+            raise ValueError(f"{name} must be set on the Moments to use this property")
         return val
 
     def _tensor(self):
         """Build the full (non-symmetric) moment tensor as a plain ndarray."""
         order = self._moment_order
-        sample = getattr(self, 'x' * order).value
+        sample = getattr(self, "x" * order).value
         leading_shape = np.shape(sample)
         T = np.zeros(leading_shape + (2,) * order, dtype=np.result_type(sample, float))
         for idx_tuple in itertools.product([0, 1], repeat=order):
             canonical = tuple(sorted(idx_tuple))
-            name = ''.join('xy'[i] for i in canonical)
+            name = "".join("xy"[i] for i in canonical)
             T[(...,) + idx_tuple] = getattr(self, name).value
         return T
 
@@ -117,14 +118,13 @@ class Moments:
             T_rot = np.moveaxis(T_rot, 0, axis_to_contract)
 
         # Read back symmetric components, restoring units
-        unit = getattr(self, 'x' * order).unit  # e.g. self.xx.unit for order 2
+        unit = getattr(self, "x" * order).unit  # e.g. self.xx.unit for order 2
         moment_names = [
-            ''.join(p)
-            for p in itertools.combinations_with_replacement('xy', order)
+            "".join(p) for p in itertools.combinations_with_replacement("xy", order)
         ]
         new_moments = {}
         for name in moment_names:
-            idx = tuple(0 if ch == 'x' else 1 for ch in name)
+            idx = tuple(0 if ch == "x" else 1 for ch in name)
             new_moments[name] = T_rot[(...,) + idx] * unit
         return type(self)(**new_moments, frame=frame, field=self.field, rtp=self.rtp)
 
@@ -132,13 +132,14 @@ class Moments:
         """Return a new Moments with x and y swapped (reflection x↔y)."""
         order = self._moment_order
         moment_names = [
-            ''.join(p)
-            for p in itertools.combinations_with_replacement('xy', order)
+            "".join(p) for p in itertools.combinations_with_replacement("xy", order)
         ]
         new_moments = {}
         for name in moment_names:
             # Swap x↔y in the name then re-sort to canonical form
-            canonical_swapped = ''.join(sorted('y' if ch == 'x' else 'x' for ch in name))
+            canonical_swapped = "".join(
+                sorted("y" if ch == "x" else "x" for ch in name)
+            )
             new_moments[name] = getattr(self, canonical_swapped)
         return type(self)(**new_moments, frame=frame, field=self.field, rtp=self.rtp)
 
@@ -146,45 +147,49 @@ class Moments:
         """Return an identical Moments with a different frame label."""
         order = self._moment_order
         moment_names = [
-            ''.join(p)
-            for p in itertools.combinations_with_replacement('xy', order)
+            "".join(p) for p in itertools.combinations_with_replacement("xy", order)
         ]
-        return type(self)(**{n: getattr(self, n) for n in moment_names}, frame=frame, field=self.field, rtp=self.rtp)
+        return type(self)(
+            **{n: getattr(self, n) for n in moment_names},
+            frame=frame,
+            field=self.field,
+            rtp=self.rtp,
+        )
 
     @property
     def ocs(self):
         """These moments in the OCS frame."""
-        if self.frame == 'ocs':
+        if self.frame == "ocs":
             return self
-        rtp = self._require('rtp')
-        return self.ccs._rot(-rtp, 'ocs')
+        rtp = self._require("rtp")
+        return self.ccs._rot(-rtp, "ocs")
 
     @property
     def ccs(self):
         """These moments in the CCS frame (always frame='ccs')."""
-        if self.frame == 'ccs':
+        if self.frame == "ccs":
             return self
-        if self.frame == 'edcs':
-            return self._relabel('ccs')
-        if self.frame == 'dvcs':
-            return self._swap('ccs')
+        if self.frame == "edcs":
+            return self._relabel("ccs")
+        if self.frame == "dvcs":
+            return self._swap("ccs")
         # ocs
-        rtp = self._require('rtp')
-        return self._rot(rtp, 'ccs')
+        rtp = self._require("rtp")
+        return self._rot(rtp, "ccs")
 
     @property
     def edcs(self):
         """These moments in the EDCS frame (synonym for CCS, preserves name)."""
-        if self.frame == 'edcs':
+        if self.frame == "edcs":
             return self
-        return self.ccs._relabel('edcs')
+        return self.ccs._relabel("edcs")
 
     @property
     def dvcs(self):
         """These moments in the DVCS frame (transpose of EDCS/CCS)."""
-        if self.frame == 'dvcs':
+        if self.frame == "dvcs":
             return self
-        return self.ccs._swap('dvcs')
+        return self.ccs._swap("dvcs")
 
     def spin(self, n, m):
         """Return the (n, m) spin-decomposed moment component.
@@ -222,7 +227,7 @@ class Moments:
         q = (order - n) // 2
 
         T = self._tensor()
-        unit = getattr(self, 'x' * order).unit
+        unit = getattr(self, "x" * order).unit
 
         ez = np.array([1, 1j])
         ezbar = np.array([1, -1j])

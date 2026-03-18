@@ -1,4 +1,5 @@
 """Tests for the Sensitivity class."""
+
 from __future__ import annotations
 
 import astropy.units as u
@@ -6,16 +7,9 @@ import numpy as np
 import pytest
 from astropy.coordinates import Angle
 
-from StarSharp.datatypes import (
-    DoubleZernikes,
-    FieldCoords,
-    Sensitivity,
-    Spots,
-    State,
-    Zernikes,
-)
-from .utils import RTP, _make_field
+from StarSharp.datatypes import DoubleZernikes, Sensitivity, Spots, State, Zernikes
 
+from .utils import RTP, _make_field
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +83,9 @@ def _make_spots_nominal(rng=None):
     vig = np.zeros((NFIELD, NRAY), dtype=bool)
     field = _make_field(NFIELD, rtp=RTP)
     return Spots(
-        dx=dx, dy=dy, vignetted=vig,
+        dx=dx,
+        dy=dy,
+        vignetted=vig,
         field=field,
         wavelength=620.0 * u.nm,
         frame="ccs",
@@ -165,6 +161,7 @@ def _make_dz_sensitivity():
 # Tests: __class_getitem__
 # ---------------------------------------------------------------------------
 
+
 class TestClassGetitem:
     def test_type_hint_sugar(self):
         assert Sensitivity[Zernikes] is Sensitivity
@@ -175,6 +172,7 @@ class TestClassGetitem:
 # ---------------------------------------------------------------------------
 # Tests: from_finite_differences  —  Zernikes
 # ---------------------------------------------------------------------------
+
 
 class TestFromFiniteDifferencesZernikes:
     def test_gradient_shape(self):
@@ -189,9 +187,7 @@ class TestFromFiniteDifferencesZernikes:
         sens, perturbed = _make_zk_sensitivity()
         steps = sens.steps
         for i in range(NDOF):
-            expected = (
-                (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
-            )
+            expected = (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
             np.testing.assert_allclose(
                 sens.gradient.coefs[i].to_value(u.um),
                 expected.to_value(u.um),
@@ -201,6 +197,7 @@ class TestFromFiniteDifferencesZernikes:
 # ---------------------------------------------------------------------------
 # Tests: from_finite_differences  —  Spots
 # ---------------------------------------------------------------------------
+
 
 class TestFromFiniteDifferencesSpots:
     def test_gradient_shape(self):
@@ -213,9 +210,7 @@ class TestFromFiniteDifferencesSpots:
         sens, perturbed = _make_spots_sensitivity()
         steps = sens.steps
         for i in range(NDOF):
-            expected = (
-                (perturbed[i].dx - sens.nominal.dx) / steps.value[i]
-            )
+            expected = (perturbed[i].dx - sens.nominal.dx) / steps.value[i]
             np.testing.assert_allclose(
                 sens.gradient.dx[i].to_value(u.um),
                 expected.to_value(u.um),
@@ -233,6 +228,7 @@ class TestFromFiniteDifferencesSpots:
 # Tests: from_finite_differences  —  DoubleZernikes
 # ---------------------------------------------------------------------------
 
+
 class TestFromFiniteDifferencesDZ:
     def test_gradient_shape(self):
         sens, _ = _make_dz_sensitivity()
@@ -242,9 +238,7 @@ class TestFromFiniteDifferencesDZ:
         sens, perturbed = _make_dz_sensitivity()
         steps = sens.steps
         for i in range(NDOF):
-            expected = (
-                (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
-            )
+            expected = (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
             np.testing.assert_allclose(
                 sens.gradient.coefs[i].to_value(u.um),
                 expected.to_value(u.um),
@@ -254,6 +248,7 @@ class TestFromFiniteDifferencesDZ:
 # ---------------------------------------------------------------------------
 # Tests: properties and indexing
 # ---------------------------------------------------------------------------
+
 
 class TestProperties:
     def test_ndof(self):
@@ -297,6 +292,7 @@ class TestProperties:
 # Tests: predict
 # ---------------------------------------------------------------------------
 
+
 class TestPredict:
     def test_predict_zernikes(self):
         sens, _ = _make_zk_sensitivity()
@@ -315,9 +311,7 @@ class TestPredict:
         expected = sens.nominal.coefs.value + np.einsum(
             "i...,i->...", sens.gradient.coefs.value, weights
         )
-        np.testing.assert_allclose(
-            result.coefs.to_value(u.um), expected, rtol=1e-12
-        )
+        np.testing.assert_allclose(result.coefs.to_value(u.um), expected, rtol=1e-12)
 
     def test_predict_spots(self):
         sens, _ = _make_spots_sensitivity()
@@ -334,9 +328,7 @@ class TestPredict:
         expected_dx = sens.nominal.dx.value + np.einsum(
             "i...,i->...", sens.gradient.dx.value, weights
         )
-        np.testing.assert_allclose(
-            result.dx.to_value(u.um), expected_dx, rtol=1e-12
-        )
+        np.testing.assert_allclose(result.dx.to_value(u.um), expected_dx, rtol=1e-12)
 
     def test_predict_double_zernikes(self):
         sens, _ = _make_dz_sensitivity()
@@ -353,9 +345,7 @@ class TestPredict:
         expected = sens.nominal.coefs.value + np.einsum(
             "i...,i->...", sens.gradient.coefs.value, weights
         )
-        np.testing.assert_allclose(
-            result.coefs.to_value(u.um), expected, rtol=1e-12
-        )
+        np.testing.assert_allclose(result.coefs.to_value(u.um), expected, rtol=1e-12)
 
     def test_predict_zero_is_nominal(self):
         sens, _ = _make_zk_sensitivity()
@@ -396,6 +386,7 @@ class TestPredict:
 # ---------------------------------------------------------------------------
 # Tests: repr
 # ---------------------------------------------------------------------------
+
 
 class TestRepr:
     def test_repr_zernikes(self):

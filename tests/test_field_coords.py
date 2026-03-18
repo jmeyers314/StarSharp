@@ -1,4 +1,5 @@
 """Tests for FieldCoords."""
+
 from __future__ import annotations
 
 import astropy.units as u
@@ -7,7 +8,8 @@ import pytest
 from astropy.coordinates import Angle
 
 from StarSharp.datatypes import FieldCoords
-from .utils import RTP, _make_wcs, _make_field
+
+from .utils import RTP, _make_field, _make_wcs
 
 
 class TestFieldCoordsConstruction:

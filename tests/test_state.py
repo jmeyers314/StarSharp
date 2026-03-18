@@ -1,4 +1,5 @@
 """Tests for State and StateFactory."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -34,9 +35,7 @@ class TestStateConstruction:
 
     def test_from_v(self):
         Vh = _make_Vh(5, 3)
-        s = State(
-            value=np.ones(3), basis="v", Vh=Vh, use_dof=np.arange(5), n_dof=10
-        )
+        s = State(value=np.ones(3), basis="v", Vh=Vh, use_dof=np.arange(5), n_dof=10)
         assert s.basis == "v"
         assert s.nkeep == 3
 
@@ -70,9 +69,7 @@ class TestStateConversions:
 
     def test_v_identity(self):
         Vh = _make_Vh(5, 3)
-        s = State(
-            value=np.ones(3), basis="v", Vh=Vh, use_dof=np.arange(5), n_dof=10
-        )
+        s = State(value=np.ones(3), basis="v", Vh=Vh, use_dof=np.arange(5), n_dof=10)
         assert s.v is s
 
     def test_x_to_f_roundtrip(self):
@@ -203,10 +200,7 @@ class TestStateAdd:
         s2 = sf2.from_x(np.array([0.5, -1.0, 2.0, 0.0, 1.5, -0.5, 0.0, 0.0]))
         ssum = s1 + s2
         assert ssum.basis == "f"
-        np.testing.assert_allclose(
-            ssum.value, s1.f.value + s2.f.value,
-            atol=1e-12
-        )
+        np.testing.assert_allclose(ssum.value, s1.f.value + s2.f.value, atol=1e-12)
 
 
 class TestStateRequires:
@@ -294,4 +288,3 @@ class TestStateFactory:
         # If norm is all ones, should match no-norm
         sf_ones = StateFactory(A=A, use_dof=np.arange(5), norm=np.ones(5))
         np.testing.assert_allclose(sf_ones.S, sf_no_norm.S)
-

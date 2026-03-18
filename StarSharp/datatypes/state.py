@@ -6,8 +6,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-
-
 @dataclass(frozen=True)
 class State:
     VALID_BASES = ("x", "f", "v")
@@ -59,13 +57,13 @@ class State:
     def __post_init__(self):
         object.__setattr__(self, "value", np.asarray(self.value, dtype=float))
         if self.basis not in self.VALID_BASES:
-            raise ValueError(f"basis must be one of {self.VALID_BASES}, got {self.basis!r}")
+            raise ValueError(
+                f"basis must be one of {self.VALID_BASES}, got {self.basis!r}"
+            )
         if self.basis == "f" and self.n_dof is None:
             object.__setattr__(self, "n_dof", len(self.value))
         if self.basis == "v" and self.Vh is None:
-            raise ValueError(
-                "Vh must be set when constructing State with basis='v'"
-            )
+            raise ValueError("Vh must be set when constructing State with basis='v'")
 
     def _require(self, name: str):
         val = getattr(self, name)
@@ -143,12 +141,28 @@ class State:
     def __add__(self, other):
         if not isinstance(other, State):
             return NotImplemented
-        if self.n_dof is not None and other.n_dof is not None and self.n_dof != other.n_dof:
+        if (
+            self.n_dof is not None
+            and other.n_dof is not None
+            and self.n_dof != other.n_dof
+        ):
             raise ValueError("Cannot add States with different n_dof")
 
-        if self.use_dof is not None and other.use_dof is not None and np.array_equal(self.use_dof, other.use_dof):
-            if self.n_dof is not None and other.n_dof is not None and self.n_dof == other.n_dof:
-                if self.Vh is not None and other.Vh is not None and np.array_equal(self.Vh, other.Vh):
+        if (
+            self.use_dof is not None
+            and other.use_dof is not None
+            and np.array_equal(self.use_dof, other.use_dof)
+        ):
+            if (
+                self.n_dof is not None
+                and other.n_dof is not None
+                and self.n_dof == other.n_dof
+            ):
+                if (
+                    self.Vh is not None
+                    and other.Vh is not None
+                    and np.array_equal(self.Vh, other.Vh)
+                ):
                     # Same use_dof, n_dof, and Vh: add in v-basis
                     return State(
                         value=self.v.value + other.v.value,

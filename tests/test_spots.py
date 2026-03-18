@@ -1,4 +1,5 @@
 """Tests for Spots."""
+
 from __future__ import annotations
 
 import itertools
@@ -9,7 +10,15 @@ import pytest
 from astropy.coordinates import Angle
 
 from StarSharp.datatypes import FieldCoords, Moments, Spots
-from .utils import RTP, _make_wcs, _make_field, _make_spots, _make_spots_single, _make_spots_batched
+
+from .utils import (
+    RTP,
+    _make_field,
+    _make_spots,
+    _make_spots_batched,
+    _make_spots_single,
+    _make_wcs,
+)
 
 
 class TestSpotsConstruction:
@@ -194,8 +203,7 @@ class TestSpotsComputeMoments:
         for order in (2, 3, 4):
             m = sp.compute_moments(order=order)
             names = [
-                ''.join(p)
-                for p in itertools.combinations_with_replacement('xy', order)
+                "".join(p) for p in itertools.combinations_with_replacement("xy", order)
             ]
             for name in names:
                 assert getattr(m, name).unit == u.micron**order
@@ -229,7 +237,7 @@ class TestSpotsComputeMoments:
         m_batched = sp.compute_moments(order=2)
         for i in range(3):
             m_single = sp[i].compute_moments(order=2)
-            for name in ('xx', 'xy', 'yy'):
+            for name in ("xx", "xy", "yy"):
                 np.testing.assert_allclose(
                     getattr(m_batched, name)[i].value,
                     getattr(m_single, name).value,
@@ -257,21 +265,20 @@ class TestSpotsComputeMoments:
         np.testing.assert_allclose(m_vig.xx[2].value, m_none.xx[2].value)
         assert not np.isclose(m_vig.xx[1].value, m_none.xx[1].value)
 
-    @pytest.mark.parametrize('order', [2, 3, 4, 5])
+    @pytest.mark.parametrize("order", [2, 3, 4, 5])
     def test_moments_rotate_consistent_with_spots_rotate_single(self, order):
         """Single field point: moments_ccs.ocs == spots_ocs.compute_moments."""
         sp_ccs = _make_spots_single(n_ray=500)
-        assert sp_ccs.frame == 'ccs'
+        assert sp_ccs.frame == "ccs"
 
         m_via_rotate = sp_ccs.compute_moments(order=order).ocs
         m_via_spots = sp_ccs.ocs.compute_moments(order=order)
 
-        assert m_via_rotate.frame == 'ocs'
-        assert m_via_spots.frame == 'ocs'
+        assert m_via_rotate.frame == "ocs"
+        assert m_via_spots.frame == "ocs"
 
         moment_names = [
-            ''.join(p)
-            for p in itertools.combinations_with_replacement('xy', order)
+            "".join(p) for p in itertools.combinations_with_replacement("xy", order)
         ]
         for name in moment_names:
             np.testing.assert_allclose(
@@ -284,21 +291,20 @@ class TestSpotsComputeMoments:
                 ),
             )
 
-    @pytest.mark.parametrize('order', [2, 3, 4, 5])
+    @pytest.mark.parametrize("order", [2, 3, 4, 5])
     def test_moments_rotate_consistent_with_spots_rotate_batched(self, order):
         """Batched field points: moments_ccs.ocs == spots_ocs.compute_moments."""
         sp_ccs = _make_spots_batched(n_field=4, n_ray=500)
-        assert sp_ccs.frame == 'ccs'
+        assert sp_ccs.frame == "ccs"
 
         m_via_rotate = sp_ccs.compute_moments(order=order).ocs
         m_via_spots = sp_ccs.ocs.compute_moments(order=order)
 
-        assert m_via_rotate.frame == 'ocs'
-        assert m_via_spots.frame == 'ocs'
+        assert m_via_rotate.frame == "ocs"
+        assert m_via_spots.frame == "ocs"
 
         moment_names = [
-            ''.join(p)
-            for p in itertools.combinations_with_replacement('xy', order)
+            "".join(p) for p in itertools.combinations_with_replacement("xy", order)
         ]
         for name in moment_names:
             np.testing.assert_allclose(

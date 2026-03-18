@@ -32,7 +32,8 @@ class Zernikes:
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
     """
-    _sensitivity_fields = ('coefs',)
+
+    _sensitivity_fields = ("coefs",)
 
     coefs: Quantity
     field: FieldCoords
@@ -161,7 +162,9 @@ class Zernikes:
 
         # Field Zernike basis: (kmax+1, nfield) -> transpose to (nfield, kmax+1)
         B = galsim.zernike.zernikeBasis(
-            kmax, fx, fy,
+            kmax,
+            fx,
+            fy,
             R_outer=field_outer.to_value(unit),
             R_inner=field_inner.to_value(unit),
         ).T  # (nfield, kmax+1)

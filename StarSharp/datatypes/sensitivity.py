@@ -58,17 +58,13 @@ class Sensitivity:
         """
         weights = getattr(state, self.steps.basis).value
         if len(weights) != self.ndof:
-            raise ValueError(
-                f"Expected {self.ndof} weights, got {len(weights)}"
-            )
+            raise ValueError(f"Expected {self.ndof} weights, got {len(weights)}")
 
         updates = {}
         for field_name in self.gradient._sensitivity_fields:
             grad = getattr(self.gradient, field_name)
             nom = getattr(self.nominal, field_name)
-            delta = (
-                np.einsum("i...,i->...", grad.value, weights) * grad.unit
-            )
+            delta = np.einsum("i...,i->...", grad.value, weights) * grad.unit
             updates[field_name] = nom + delta
 
         return replace(self.nominal, **updates)
@@ -95,9 +91,7 @@ class Sensitivity:
         ndof = len(perturbed_list)
 
         # Compute (perturbed - nominal) / step for each sensitivity field
-        grad_arrays: dict[str, list] = {
-            f: [] for f in nominal._sensitivity_fields
-        }
+        grad_arrays: dict[str, list] = {f: [] for f in nominal._sensitivity_fields}
         for perturbed, step in zip(perturbed_list, steps.value):
             for f in nominal._sensitivity_fields:
                 diff = (getattr(perturbed, f) - getattr(nominal, f)) / step
@@ -111,9 +105,7 @@ class Sensitivity:
         # Broadcast ancillary array fields (e.g. vignetted for Spots)
         for f in getattr(nominal, "_broadcast_fields", ()):
             val = getattr(nominal, f)
-            updates[f] = np.broadcast_to(
-                val, (ndof,) + val.shape
-            ).copy()
+            updates[f] = np.broadcast_to(val, (ndof,) + val.shape).copy()
 
         gradient = replace(nominal, **updates)
         return cls(nominal=nominal, gradient=gradient, steps=steps)
