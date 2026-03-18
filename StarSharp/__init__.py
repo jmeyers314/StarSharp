@@ -8,6 +8,7 @@ from .datatypes import (
     Moments2,
     Moments3,
     Moments4,
+    Sensitivity,
 )
 from .models import RaytracedOpticalModel
 
@@ -21,5 +22,6 @@ __all__ = [
     "Moments2",
     "Moments3",
     "Moments4",
+    "Sensitivity",
     "RaytracedOpticalModel"
 ]

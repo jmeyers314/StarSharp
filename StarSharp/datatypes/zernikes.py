@@ -32,6 +32,7 @@ class Zernikes:
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
     """
+    _sensitivity_fields = ('coefs',)
 
     coefs: Quantity
     field: FieldCoords

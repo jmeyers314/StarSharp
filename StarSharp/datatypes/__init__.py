@@ -4,6 +4,7 @@ from .zernikes import Zernikes
 from .double_zernikes import DoubleZernikes
 from .state import State, StateFactory
 from .moments import Moments, Moments2, Moments3, Moments4
+from .sensitivity import Sensitivity
 
 __all__ = [
     "FieldCoords",
@@ -16,4 +17,5 @@ __all__ = [
     "Moments2",
     "Moments3",
     "Moments4",
+    "Sensitivity",
 ]

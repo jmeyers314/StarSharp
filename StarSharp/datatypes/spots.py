@@ -16,6 +16,8 @@ from .field_coords import FieldCoords
 @dataclass(frozen=True)
 class Spots:
     VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
+    _sensitivity_fields = ('dx', 'dy')
+    _broadcast_fields = ('vignetted',)
     """Spot diagrams: ray intersection positions on the focal plane.
 
     May represent one or many field points.  When batched,

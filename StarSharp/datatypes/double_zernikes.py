@@ -13,6 +13,8 @@ from .zernikes import Zernikes
 
 @dataclass(frozen=True)
 class DoubleZernikes:
+    _sensitivity_fields = ('coefs',)
+
     coefs: Quantity
     field_outer: Quantity
     field_inner: Quantity

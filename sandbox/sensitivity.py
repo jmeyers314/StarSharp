@@ -50,7 +50,6 @@ sens = model.zernikes_sensitivity(
     steps=steps,
     offset=offset,
 )
-
 fig, ax = plt.subplots(nrows=4, ncols=6, figsize=(10, 7))
 for i in range(len(sens)):
     ax_i = ax.flat[i]

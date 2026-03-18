@@ -8,7 +8,7 @@ from lsst.afw.cameraGeom import Camera, FOCAL_PLANE
 from tqdm import tqdm
 from numpy.typing import NDArray
 
-from ..datatypes import FieldCoords, Spots, Zernikes, State
+from ..datatypes import FieldCoords, Spots, Zernikes, State, Sensitivity
 
 
 FIELD_OUTER = 1.75
@@ -346,21 +346,21 @@ class RaytracedOpticalModel:
         jmax: int = 28,
         rings: int = 10,
         offset: State | None = None,
-    ) -> np.ndarray:
+    ) -> Sensitivity:
         if offset is None:
             offset = State(
                 value=np.zeros(50, dtype=np.float64),
                 basis="f",
             )
-        zk0 = self.zernikes(
+        nominal = self.zernikes(
             state=offset,
             field=field,
             jmax=jmax,
             rings=rings,
         )
 
-        zk1s = []
-        for i, step in enumerate(steps.value):  # In current basis
+        perturbed = []
+        for i, step in enumerate(steps.value):
             dval = np.zeros_like(steps.value)
             dval[i] = step
             dstate = State(
@@ -370,22 +370,76 @@ class RaytracedOpticalModel:
                 n_dof=steps.n_dof,
                 Vh=steps.Vh,
             )
-            zk1 = self.zernikes(
-                state=offset + dstate,
-                field=field,
-                jmax=jmax,
-                rings=rings,
-            )
-            zk1s.append(
-                Zernikes(
-                    coefs=(zk1.coefs - zk0.coefs) / step,
+            perturbed.append(
+                self.zernikes(
+                    state=offset + dstate,
                     field=field,
-                    R_outer=zk0.R_outer,
-                    R_inner=zk0.R_inner,
-                    wavelength=zk0.wavelength,
                     jmax=jmax,
-                    frame=zk0.frame,
-                    rtp=zk0.rtp
-                ),
+                    rings=rings,
+                )
             )
-        return zk1s
+        return Sensitivity.from_finite_differences(nominal, perturbed, steps)
+
+    def spots_sensitivity(
+        self,
+        field: FieldCoords,
+        steps: State,
+        nrad: int = 10,
+        offset: State | None = None,
+    ) -> Sensitivity:
+        if offset is None:
+            offset = State(
+                value=np.zeros(50, dtype=np.float64),
+                basis="f",
+            )
+        nominal = self.spots(
+            state=offset,
+            field=field,
+            nrad=nrad,
+        )
+
+        perturbed = []
+        for i, step in enumerate(steps.value):
+            dval = np.zeros_like(steps.value)
+            dval[i] = step
+            dstate = State(
+                value=dval,
+                basis=steps.basis,
+                use_dof=steps.use_dof,
+                n_dof=steps.n_dof,
+                Vh=steps.Vh,
+            )
+            perturbed.append(
+                self.spots(
+                    state=offset + dstate,
+                    field=field,
+                    nrad=nrad,
+                )
+            )
+        return Sensitivity.from_finite_differences(nominal, perturbed, steps)
+
+    def double_zernikes_sensitivity(
+        self,
+        field: FieldCoords,
+        steps: State,
+        kmax: int = 28,
+        field_outer=None,
+        field_inner=None,
+        jmax: int = 28,
+        rings: int = 10,
+        offset: State | None = None,
+    ) -> Sensitivity:
+        zk_sens = self.zernikes_sensitivity(
+            field=field,
+            steps=steps,
+            jmax=jmax,
+            rings=rings,
+            offset=offset,
+        )
+        dz_nominal = zk_sens.nominal.double(kmax, field_outer, field_inner)
+        dz_gradient = zk_sens.gradient.double(kmax, field_outer, field_inner)
+        return Sensitivity(
+            nominal=dz_nominal,
+            gradient=dz_gradient,
+            steps=zk_sens.steps,
+        )
