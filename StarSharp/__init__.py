@@ -10,7 +10,7 @@ from .datatypes import (
     StateFactory,
     Zernikes,
 )
-from .models import RaytracedOpticalModel
+from .models import LinearOpticalModel, RaytracedOpticalModel
 
 __all__ = [
     "FieldCoords",
@@ -23,5 +23,6 @@ __all__ = [
     "Moments3",
     "Moments4",
     "Sensitivity",
+    "LinearOpticalModel",
     "RaytracedOpticalModel",
 ]
