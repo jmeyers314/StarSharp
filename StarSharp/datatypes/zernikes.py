@@ -159,3 +159,40 @@ class Zernikes:
 
     def __repr__(self) -> str:
         return f"Zernikes({self.coefs!r}, jmax={self.jmax}, frame={self.frame!r})"
+
+    def double(self, kmax, field_outer, field_inner=None) -> DoubleZernikes:
+        from .double_zernikes import DoubleZernikes
+
+        if field_inner is None:
+            field_inner = 0.0 * field_outer
+
+        R_outer = self._require("R_outer")
+        R_inner = self._require("R_inner")
+
+        field_ang = getattr(self.field.angle, self.frame)
+        unit = field_outer.unit
+        fx = field_ang.x.to_value(unit)
+        fy = field_ang.y.to_value(unit)
+
+        # Field Zernike basis: (kmax+1, nfield) -> transpose to (nfield, kmax+1)
+        B = galsim.zernike.zernikeBasis(
+            kmax, fx, fy,
+            R_outer=field_outer.to_value(unit),
+            R_inner=field_inner.to_value(unit),
+        ).T  # (nfield, kmax+1)
+
+        # Use pinv for batch-safe least-squares fitting
+        dz_coefs = np.linalg.pinv(B) @ self.coefs.value
+
+        return DoubleZernikes(
+            coefs=dz_coefs << self.coefs.unit,
+            field_outer=field_outer,
+            field_inner=field_inner,
+            pupil_outer=R_outer,
+            pupil_inner=R_inner,
+            jmax=self.jmax,
+            kmax=kmax,
+            wavelength=self.wavelength,
+            frame=self.frame,
+            rtp=self.rtp,
+        )
