@@ -145,14 +145,24 @@ class RaytracedOpticalModel:
             .with_aos_dof(state.f.value)
         )
 
-        dx = np.full((len(field.x), len(px)), np.nan)
-        dy = np.full((len(field.x), len(px)), np.nan)
-        vignetted = np.full((len(field.x), len(px)), True, dtype=bool)
-        fpx = np.full(len(field.x), np.nan)
-        fpy = np.full(len(field.x), np.nan)
+        # Flatten batch dims so we iterate over every field point individually,
+        # then reshape outputs back to (*batch_shape, nfield, ...).
+        batch_shape = field.x.shape[:-1]
+        nfield = field.x.shape[-1]
+        total = int(np.prod(field.x.shape))
+        x_flat = field.x.reshape(total)
+        y_flat = field.y.reshape(total)
+        detnum_flat = field.detnum.reshape(total)
 
-        bar = self.tqdm(desc="Raytracing", total=len(field.x)) if self.tqdm is not None else None
-        for ifield, (thx, thy, detnum) in enumerate(zip(field.x, field.y, field.detnum)):
+        nray = len(px)
+        dx = np.full((total, nray), np.nan)
+        dy = np.full((total, nray), np.nan)
+        vignetted = np.full((total, nray), True, dtype=bool)
+        fpx = np.full(total, np.nan)
+        fpy = np.full(total, np.nan)
+
+        bar = self.tqdm(desc="Raytracing", total=total) if self.tqdm is not None else None
+        for ifield, (thx, thy, detnum) in enumerate(zip(x_flat, y_flat, detnum_flat)):
             if bar:
                 bar.update(1)
             if detnum == -1:
@@ -177,17 +187,17 @@ class RaytracedOpticalModel:
             fpy[ifield] = fpy_
 
         out_field = FieldCoords(
-            x=fpx * 1e3 << u.m,
-            y=fpy * 1e3 << u.m,
+            x=fpx.reshape(batch_shape + (nfield,)) * 1e3 << u.m,
+            y=fpy.reshape(batch_shape + (nfield,)) * 1e3 << u.m,
             frame="ccs",
             rtp=self.rtp,
             wcs=field.wcs,
             camera=field.camera
         )
         return Spots(
-            dx * 1e6 << u.micron,
-            dy * 1e6 << u.micron,
-            vignetted,
+            dx.reshape(batch_shape + (nfield, nray)) * 1e6 << u.micron,
+            dy.reshape(batch_shape + (nfield, nray)) * 1e6 << u.micron,
+            vignetted.reshape(batch_shape + (nfield, nray)),
             field=out_field,
             wavelength=self.wavelength,
             frame="ccs",
@@ -210,9 +220,18 @@ class RaytracedOpticalModel:
             .with_aos_dof(state.f.value)
         )
 
-        bar = self.tqdm(desc="Raytracing", total=len(field.x)) if self.tqdm is not None else None
+        # Flatten batch dims so we iterate over every field point individually,
+        # then reshape outputs back to (*batch_shape, nfield, jmax+1).
+        batch_shape = field.x.shape[:-1]
+        nfield = field.x.shape[-1]
+        total = int(np.prod(field.x.shape))
+        x_flat = field.x.reshape(total)
+        y_flat = field.y.reshape(total)
+        detnum_flat = field.detnum.reshape(total)
+
+        bar = self.tqdm(desc="Raytracing", total=total) if self.tqdm is not None else None
         zk = []
-        for thx, thy, detnum in zip(field.x, field.y, field.detnum):
+        for thx, thy, detnum in zip(x_flat, y_flat, detnum_flat):
             if bar:
                 bar.update(1)
             if detnum == -1:
@@ -233,8 +252,9 @@ class RaytracedOpticalModel:
                 zkgq = np.full(jmax+1, np.nan)
             zk.append(zkgq)
 
+        coefs = np.array(zk, dtype=float).reshape(batch_shape + (nfield, jmax + 1))
         return Zernikes(
-            coefs=zk * self.wavelength.to(u.um),
+            coefs=coefs * self.wavelength.to(u.um),
             field=field,
             R_outer=PUPIL_OUTER * u.m,
             R_inner=PUPIL_INNER * u.m,

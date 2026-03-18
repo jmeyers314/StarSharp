@@ -50,7 +50,7 @@ class TestZernikesConstruction:
     def test_scalar_coefs_promoted(self):
         field = _make_field(1)
         zk = Zernikes(coefs=1.0 * u.um, field=field)
-        assert zk.coefs.ndim == 1
+        assert zk.coefs.ndim == 2
 
     def test_eps(self):
         zk = _make_zernikes(R_outer=4.18 << u.m, R_inner=2.5 << u.m)
@@ -119,14 +119,14 @@ class TestZernikesSlicing:
     def test_getitem_int(self):
         zk = _make_zernikes(n_field=5, rtp=RTP)
         s = zk[2]
-        assert s.coefs.ndim == 1
-        assert len(s) == 1
+        assert s.coefs.ndim == 2
+        assert s.coefs.shape == (1, zk.jmax + 1)
         assert s.rtp is RTP
 
     def test_getitem_slice(self):
         zk = _make_zernikes(n_field=5, rtp=RTP)
         s = zk[1:4]
-        assert len(s) == 3
+        assert s.coefs.shape[0] == 3
         assert s.R_outer == zk.R_outer
 
     def test_frozen(self):
@@ -136,20 +136,20 @@ class TestZernikesSlicing:
 
 
 class TestZernikesToGalsim:
-    def test_1d(self):
-        zk = _make_zernikes(jmax=10, R_outer=4.18 << u.m, R_inner=2.5 << u.m)
+    def test_single_field(self):
+        zk = _make_zernikes(n_field=1, jmax=10, R_outer=4.18 << u.m, R_inner=2.5 << u.m)
         gz = zk.to_galsim()
         assert isinstance(gz, galsim.zernike.Zernike)
         assert gz.R_outer == 4.18
         assert gz.R_inner == 2.5
-        np.testing.assert_allclose(gz.coef, zk.coefs.to_value(u.um))
+        np.testing.assert_allclose(gz.coef, zk.coefs.squeeze().to_value(u.um))
 
-    def test_2d_requires_idx(self):
+    def test_multi_field_requires_idx(self):
         zk = _make_zernikes(n_field=3, jmax=10)
         with pytest.raises((IndexError, TypeError)):
-            zk.to_galsim()  # idx=None on 2-D should fail
+            zk.to_galsim()  # idx=None on multi-field should fail
 
-    def test_2d_with_idx(self):
+    def test_multi_field_with_idx(self):
         zk = _make_zernikes(n_field=3, jmax=10)
         gz = zk.to_galsim(idx=1)
         np.testing.assert_allclose(gz.coef, zk.coefs[1].to_value(u.um))

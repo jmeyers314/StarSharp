@@ -55,6 +55,10 @@ class FieldCoords:
             raise TypeError("x and y must be astropy Quantity instances with units")
         object.__setattr__(self, "x", np.atleast_1d(self.x))
         object.__setattr__(self, "y", np.atleast_1d(self.y))
+        if self.x.shape != self.y.shape:
+            raise ValueError(
+                f"x and y must have the same shape, got {self.x.shape} and {self.y.shape}"
+            )
         # Coerce frame to lower case, but preserve original name (including 'edcs')
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
@@ -191,17 +195,32 @@ class FieldCoords:
         )
 
     @property
+    def nfield(self) -> int:
+        """Number of field points (last axis)."""
+        return self.x.shape[-1]
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Shape of the leading batch dimensions."""
+        return self.x.shape[:-1]
+
+    @property
     def focal_plane(self) -> FieldCoords:
         """This coordinate in focal-plane space."""
         if self.space == "focal_plane":
             return self
         wcs = self._require("wcs")
         field = self.ocs
-        args = [field.x.to_value(u.radian), field.y.to_value(u.radian)]
+        orig_shape = field.x.shape
+        fx = field.x.to_value(u.radian).ravel()
+        fy = field.y.to_value(u.radian).ravel()
+        args = [fx, fy]
         kwargs = {}
         if isinstance(wcs, CelestialWCS):
             kwargs["units"] = "radians"
         fpx, fpy = wcs.toImage(*args, **kwargs)
+        fpx = fpx.reshape(orig_shape)
+        fpy = fpy.reshape(orig_shape)
         fp_ccs = FieldCoords(
             x=fpx << u.mm,
             y=fpy << u.mm,
@@ -219,7 +238,10 @@ class FieldCoords:
             return self
         wcs = self._require("wcs")
         fp = self.ccs
-        args = [fp.x.to_value(u.mm), fp.y.to_value(u.mm)]
+        orig_shape = fp.x.shape
+        fpx = fp.x.to_value(u.mm).ravel()
+        fpy = fp.y.to_value(u.mm).ravel()
+        args = [fpx, fpy]
         kwargs = {}
         if isinstance(wcs, CelestialWCS):
             kwargs["units"] = "radians"
@@ -228,6 +250,8 @@ class FieldCoords:
         # towards 0
         fx[fx > np.pi] -= 2 * np.pi
         fy[fy > np.pi] -= 2 * np.pi
+        fx = fx.reshape(orig_shape)
+        fy = fy.reshape(orig_shape)
         field_ocs = FieldCoords(
             x=fx << u.radian,
             y=fy << u.radian,
@@ -243,8 +267,9 @@ class FieldCoords:
         """Detector number(s). Returns -1 for points off any detector."""
         camera = self._require("camera")
         fp = self.focal_plane.ccs
-        x = np.atleast_1d(fp.x.to_value(u.mm))
-        y = np.atleast_1d(fp.y.to_value(u.mm))
+        orig_shape = fp.x.shape
+        x = fp.x.to_value(u.mm).ravel()
+        y = fp.y.to_value(u.mm).ravel()
 
         result = np.full(x.shape, -1, dtype=int)
         for det in camera:
@@ -254,16 +279,12 @@ class FieldCoords:
             mask = (x >= min(xs)) & (x <= max(xs)) & (y >= min(ys)) & (y <= max(ys))
             result[mask] = det.getId()
 
-        if np.isscalar(fp.x.value):
-            return result.item()
-        return result
+        return result.reshape(orig_shape)
 
     def __len__(self) -> int:
-        if self.x.ndim == 1:
-            return 1
         return self.x.shape[0]
 
-    def __getitem__(self, idx: int | slice) -> FieldCoords:
+    def __getitem__(self, idx) -> FieldCoords:
         return FieldCoords(
             x=self.x[idx],
             y=self.y[idx],

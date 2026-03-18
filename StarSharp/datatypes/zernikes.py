@@ -43,7 +43,7 @@ class Zernikes:
     rtp: Angle | None = None
 
     def __post_init__(self):
-        object.__setattr__(self, "coefs", np.atleast_1d(self.coefs))
+        object.__setattr__(self, "coefs", np.atleast_2d(self.coefs))
         if self.jmax is None:
             object.__setattr__(self, "jmax", self.coefs.shape[-1] - 1)
         if (
@@ -59,16 +59,24 @@ class Zernikes:
             )
 
     @property
+    def nfield(self) -> int:
+        """Number of field points (second-to-last axis)."""
+        return self.coefs.shape[-2]
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Shape of the leading batch dimensions."""
+        return self.coefs.shape[:-2]
+
+    @property
     def eps(self) -> float:
         """Obscuration ratio R_inner / R_outer."""
         return (self.R_inner / self.R_outer).value
 
     def __len__(self) -> int:
-        if self.coefs.ndim == 1:
-            return 1
         return self.coefs.shape[0]
 
-    def __getitem__(self, idx: int | slice) -> Zernikes:
+    def __getitem__(self, idx) -> Zernikes:
         return Zernikes(
             coefs=self.coefs[idx],
             field=self.field[idx],
@@ -129,13 +137,18 @@ class Zernikes:
         Parameters
         ----------
         idx : int or None
-            Index into the batch dimension.  Required when
-            ``coefs`` has more than one dimension; ignored for a
-            single (1-D) coefficient vector.
+            Index into the batch/field dimensions.  Required when
+            ``coefs`` has more than two dimensions or more than one
+            field point; ignored for a single (1, jmax+1) coefficient array.
         unit : astropy.units.Unit
             Unit for the output coefficients (default: micron).
         """
-        c = self.coefs if self.coefs.ndim == 1 else self.coefs[idx]
+        if idx is not None:
+            c = self.coefs[idx]
+        else:
+            c = self.coefs
+        # Squeeze to 1-D if possible
+        c = c.squeeze()
         if c.ndim != 1:
             raise TypeError("to_galsim() requires a single coefficient vector")
         return galsim.zernike.Zernike(

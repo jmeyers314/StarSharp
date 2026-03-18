@@ -92,16 +92,12 @@ class Moments:
         """Build the full (non-symmetric) moment tensor as a plain ndarray."""
         order = self._moment_order
         sample = getattr(self, 'x' * order).value
-        is_batched = sample.shape != ()
-        batch_shape = sample.shape if is_batched else ()
-        T = np.zeros(batch_shape + (2,) * order, dtype=sample.dtype)
+        leading_shape = np.shape(sample)
+        T = np.zeros(leading_shape + (2,) * order, dtype=np.result_type(sample, float))
         for idx_tuple in itertools.product([0, 1], repeat=order):
             canonical = tuple(sorted(idx_tuple))
             name = ''.join('xy'[i] for i in canonical)
-            if is_batched:
-                T[(slice(None),) + idx_tuple] = getattr(self, name).value
-            else:
-                T[idx_tuple] = getattr(self, name).value
+            T[(...,) + idx_tuple] = getattr(self, name).value
         return T
 
     def _rot(self, angle: Angle, frame: str):
@@ -110,7 +106,6 @@ class Moments:
         s = float(np.sin(angle.rad))
         R = np.array([[c, s], [-s, c]])
         order = self._moment_order
-        is_batched = getattr(self, 'x' * order).value.shape != ()
 
         T = self._tensor()
 
@@ -130,10 +125,7 @@ class Moments:
         new_moments = {}
         for name in moment_names:
             idx = tuple(0 if ch == 'x' else 1 for ch in name)
-            if is_batched:
-                new_moments[name] = T_rot[(...,) + idx] * unit
-            else:
-                new_moments[name] = T_rot[idx] * unit
+            new_moments[name] = T_rot[(...,) + idx] * unit
         return type(self)(**new_moments, frame=frame, field=self.field, rtp=self.rtp)
 
     def _swap(self, frame: str):

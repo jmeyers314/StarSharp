@@ -48,9 +48,9 @@ class Spots:
     wcs: BaseWCS | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "dx", np.atleast_1d(self.dx))
-        object.__setattr__(self, "dy", np.atleast_1d(self.dy))
-        object.__setattr__(self, "vignetted", np.atleast_1d(self.vignetted))
+        object.__setattr__(self, "dx", np.atleast_2d(self.dx))
+        object.__setattr__(self, "dy", np.atleast_2d(self.dy))
+        object.__setattr__(self, "vignetted", np.atleast_2d(self.vignetted))
         # Coerce frame to lower case, but preserve original name (including 'edcs')
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
@@ -69,11 +69,9 @@ class Spots:
             )
 
     def __len__(self) -> int:
-        if self.dx.ndim == 1:
-            return 1
         return self.dx.shape[0]
 
-    def __getitem__(self, idx: int | slice) -> Spots:
+    def __getitem__(self, idx) -> Spots:
         return Spots(
             dx=self.dx[idx],
             dy=self.dy[idx],
@@ -91,6 +89,21 @@ class Spots:
         if val is None:
             raise ValueError(f"{name} must be set on the Spots to use this property")
         return val
+
+    @property
+    def nfield(self) -> int:
+        """Number of field points (second-to-last axis)."""
+        return self.dx.shape[-2]
+
+    @property
+    def nray(self) -> int:
+        """Number of rays per field point (last axis)."""
+        return self.dx.shape[-1]
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Shape of the leading batch dimensions."""
+        return self.dx.shape[:-2]
 
     @property
     def space(self) -> str:
@@ -185,14 +198,21 @@ class Spots:
         if self.space == "focal_plane":
             return self
         wcs = self._require("wcs")
-        sfx = self.ocs.dx.to_value(u.radian) + self.field.angle.ocs.x.to_value(u.radian)[:, np.newaxis]
-        sfy = self.ocs.dy.to_value(u.radian) + self.field.angle.ocs.y.to_value(u.radian)[:, np.newaxis]
-        args = [sfx, sfy]
+        fx = self.field.angle.ocs.x.to_value(u.radian)  # (..., nfield)
+        fy = self.field.angle.ocs.y.to_value(u.radian)
+        sfx = self.ocs.dx.to_value(u.radian) + fx[..., np.newaxis]
+        sfy = self.ocs.dy.to_value(u.radian) + fy[..., np.newaxis]
+        orig_shape = sfx.shape
+        args = [sfx.ravel(), sfy.ravel()]
         if isinstance(wcs, CelestialWCS):
             args.append("radians")
         sfpx, sfpy = wcs.toImage(*args)
-        sfpx -= self.field.focal_plane.ccs.x.to_value(u.mm)[:, np.newaxis]
-        sfpy -= self.field.focal_plane.ccs.y.to_value(u.mm)[:, np.newaxis]
+        sfpx = sfpx.reshape(orig_shape)
+        sfpy = sfpy.reshape(orig_shape)
+        cfx = self.field.focal_plane.ccs.x.to_value(u.mm)  # (..., nfield)
+        cfy = self.field.focal_plane.ccs.y.to_value(u.mm)
+        sfpx -= cfx[..., np.newaxis]
+        sfpy -= cfy[..., np.newaxis]
 
         fp_ccs = Spots(
             dx=sfpx << u.mm,
@@ -212,15 +232,22 @@ class Spots:
         if self.space == "angle":
             return self
         wcs = self._require("wcs")
-        sfpx = self.ccs.dx.to_value(u.mm) + self.field.focal_plane.ccs.x.to_value(u.mm)[:, np.newaxis]
-        sfpy = self.ccs.dy.to_value(u.mm) + self.field.focal_plane.ccs.y.to_value(u.mm)[:, np.newaxis]
-        args = [sfpx, sfpy]
+        cfpx = self.field.focal_plane.ccs.x.to_value(u.mm)  # (..., nfield)
+        cfpy = self.field.focal_plane.ccs.y.to_value(u.mm)
+        sfpx = self.ccs.dx.to_value(u.mm) + cfpx[..., np.newaxis]
+        sfpy = self.ccs.dy.to_value(u.mm) + cfpy[..., np.newaxis]
+        orig_shape = sfpx.shape
+        args = [sfpx.ravel(), sfpy.ravel()]
         if isinstance(wcs, CelestialWCS):
             args.append("radians")
 
         sfx, sfy = wcs.toWorld(*args)
-        sfx -= self.field.angle.ocs.x.to_value(u.radian)[:, np.newaxis]
-        sfy -= self.field.angle.ocs.y.to_value(u.radian)[:, np.newaxis]
+        sfx = sfx.reshape(orig_shape)
+        sfy = sfy.reshape(orig_shape)
+        fax = self.field.angle.ocs.x.to_value(u.radian)  # (..., nfield)
+        fay = self.field.angle.ocs.y.to_value(u.radian)
+        sfx -= fax[..., np.newaxis]
+        sfy -= fay[..., np.newaxis]
 
         field_ocs = Spots(
             dx=sfx << u.radian,

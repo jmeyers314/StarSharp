@@ -19,7 +19,7 @@ class TestFieldCoordsConstruction:
     def test_1d_stays_1d(self):
         fc = _make_field(5)
         assert fc.x.ndim == 1
-        assert len(fc) == 1  # 1-D -> single field point batch
+        assert len(fc) == 5  # 1-D -> 5 field points
 
     def test_2d_stays_2d(self):
         x = np.ones((3, 4)) * u.deg

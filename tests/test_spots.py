@@ -21,16 +21,16 @@ class TestSpotsConstruction:
             vignetted=np.array(False),
             field=fc,
         )
-        assert sp.dx.ndim == 1
-        assert sp.dy.ndim == 1
-        assert sp.vignetted.ndim == 1
+        assert sp.dx.ndim == 2
+        assert sp.dy.ndim == 2
+        assert sp.vignetted.ndim == 2
 
     def test_2d_shape_preserved(self):
         sp = _make_spots(4, 100, rtp=RTP)
         assert sp.dx.shape == (4, 100)
         assert len(sp) == 4
 
-    def test_1d_len_is_one(self):
+    def test_1d_promoted_to_2d(self):
         fc = FieldCoords(x=1.0 * u.deg, y=0.5 * u.deg)
         sp = Spots(
             dx=np.ones(10) * u.um,
@@ -38,6 +38,8 @@ class TestSpotsConstruction:
             vignetted=np.zeros(10, dtype=bool),
             field=fc,
         )
+        assert sp.dx.ndim == 2
+        assert sp.dx.shape == (1, 10)
         assert len(sp) == 1
 
 
@@ -136,8 +138,8 @@ class TestSpotsSlicing:
     def test_getitem_int(self):
         sp = _make_spots(5, 20, rtp=RTP)
         s = sp[2]
-        assert s.dx.ndim == 1
-        assert len(s) == 1
+        assert s.dx.ndim == 2
+        assert s.dx.shape == (1, 20)
         assert s.wavelength == sp.wavelength
 
     def test_getitem_slice(self):
