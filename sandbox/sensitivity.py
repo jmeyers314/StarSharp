@@ -8,7 +8,7 @@ from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE
 from lsst.obs.lsst import LsstCam
-from StarSharp import RaytracedOpticalModel, State, StateFactory
+from StarSharp import RaytracedOpticalModel, StateFactory
 from tqdm import tqdm
 
 fiducial = batoid.Optic.fromYaml("Rubin_v3.14_r.yaml")
