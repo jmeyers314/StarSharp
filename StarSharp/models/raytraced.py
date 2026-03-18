@@ -5,6 +5,7 @@ from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
 from numpy.typing import NDArray
+from typing import Literal
 from tqdm import tqdm
 
 from ..datatypes import FieldCoords, Sensitivity, Spots, State, Zernikes
@@ -53,6 +54,7 @@ class RaytracedOpticalModel:
     ):
         self.builder = builder
         self.rtp = rtp
+        self.fiducial = builder.with_rtp(rtp).build()
         self.wavelength = wavelength
         self.camera = camera
         self.tqdm = tqdm
@@ -182,6 +184,7 @@ class RaytracedOpticalModel:
         state: State,
         field: FieldCoords,
         nrad: int = 10,
+        reference: Literal["chief", "mean"] = "chief",
     ) -> Spots:
         """Trace rays and return spot diagrams.
 
@@ -194,6 +197,10 @@ class RaytracedOpticalModel:
             accepted; coordinates are converted to OCS angles internally.
         nrad : int
             Number of radial rings in the hexapolar stop sampling grid.
+        reference: Literal["chief", "mean", "ring"]
+            Whether to center spot diagrams on the chief ray intersection,
+            the mean intersection of all unvignetted rays, or the mean of a
+            ring of (possibly vignetted) rays.
 
         Returns
         -------
@@ -253,8 +260,40 @@ class RaytracedOpticalModel:
             )
             rays = telescope.trace(rays)
             w = ~rays.vignetted
-            fpx_ = np.mean(rays.x[w])
-            fpy_ = np.mean(rays.y[w])
+            if reference == "chief":
+                cr = batoid.RayVector.fromStop(
+                    0.0, 0.0,
+                    theta_x=thx.to_value(u.rad),
+                    theta_y=thy.to_value(u.rad),
+                    optic=telescope,
+                    wavelength=self.wavelength.to_value(u.m),
+                )
+                cr = telescope.trace(cr)
+                fpx_ = cr.x[0]
+                fpy_ = cr.y[0]
+            elif reference == "ring":
+                # Use a ring of rays ~30% of the way out in the pupil,
+                # which should be more stable than the (always vignetted) chief
+                # ray but less noisy than the mean of all unvignetted rays.
+                # This radius is generally unvignetted for a long time.
+                ring_radius = 0.3 * (PUPIL_OUTER - PUPIL_INNER) + PUPIL_INNER
+                ph = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+                ring = batoid.RayVector.fromStop(
+                    ring_radius * np.cos(ph),
+                    ring_radius * np.sin(ph),
+                    theta_x=thx.to_value(u.rad),
+                    theta_y=thy.to_value(u.rad),
+                    optic=telescope,
+                    wavelength=self.wavelength.to_value(u.m),
+                )
+                ring = telescope.trace(ring)
+                fpx_ = np.mean(ring.x)
+                fpy_ = np.mean(ring.y)
+            elif reference == "mean":
+                fpx_ = np.mean(rays.x[w])
+                fpy_ = np.mean(rays.y[w])
+            else:
+                raise ValueError(f"Invalid reference {reference!r}")
 
             dx[ifield] = rays.x - fpx_
             dy[ifield] = rays.y - fpy_
@@ -263,8 +302,8 @@ class RaytracedOpticalModel:
             fpy[ifield] = fpy_
 
         out_field = FieldCoords(
-            x=fpx.reshape(batch_shape + (nfield,)) * 1e3 << u.m,
-            y=fpy.reshape(batch_shape + (nfield,)) * 1e3 << u.m,
+            x=fpx.reshape(batch_shape + (nfield,)) * 1e3 << u.mm,
+            y=fpy.reshape(batch_shape + (nfield,)) * 1e3 << u.mm,
             frame="ccs",
             rtp=self.rtp,
             wcs=field.wcs,
