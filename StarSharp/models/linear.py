@@ -195,7 +195,7 @@ class LinearOpticalModel:
         # then linearly combined with state weights.
         field_ocs = field.angle.ocs
         sens = self._zernikes_sensitivity
-        weights = getattr(state, sens.steps.basis).value
+        weights = getattr(state, sens.basis).value
 
         # sens.gradient is a DoubleZernikes with batch_shape = (ndof,)
         # .single(field) → Zernikes with coefs shape (ndof, nfield, jmax+1)
@@ -270,7 +270,7 @@ class LinearOpticalModel:
 
         result = State(
             value=x,
-            basis=sens.steps.basis,
+            basis=sens.basis,
             use_dof=guess.use_dof,
             n_dof=guess.n_dof,
             Vh=guess.Vh,

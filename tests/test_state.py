@@ -308,10 +308,7 @@ class TestStateFactory:
             coefs=rng.standard_normal((n_field, jmax + 1)) * u.um,
             field=field,
         )
-        steps = State(
-            value=np.ones(n_dof), basis="x", use_dof=np.arange(n_dof), n_dof=n_dof
-        )
-        sens = Sensitivity(nominal=nominal, gradient=gradient, steps=steps)
+        sens = Sensitivity(nominal=nominal, gradient=gradient)
 
         use_dof = np.arange(n_dof)
         sf = StateFactory(sens, use_dof=use_dof, nkeep=3)
@@ -354,10 +351,7 @@ class TestStateFactory:
             vignetted=np.broadcast_to(vig, (n_dof, n_field, n_ray)).copy(),
             field=field,
         )
-        steps = State(
-            value=np.ones(n_dof), basis="x", use_dof=np.arange(n_dof), n_dof=n_dof
-        )
-        sens = Sensitivity(nominal=nom, gradient=grad, steps=steps)
+        sens = Sensitivity(nominal=nom, gradient=grad)
 
         sf = StateFactory(sens, use_dof=np.arange(n_dof))
 

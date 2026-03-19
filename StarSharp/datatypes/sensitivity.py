@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .state import State
 
 
 @dataclass(frozen=True)
 class Sensitivity:
+    VALID_BASES = ("x", "f", "v")
+
     """Linear sensitivity of an observable w.r.t. DOF perturbations.
 
     ``Sensitivity[T]`` wraps a *nominal* observable of type ``T`` and a
@@ -33,7 +36,10 @@ class Sensitivity:
 
     gradient: object
     nominal: object | None = None
-    steps: State | None = None
+    basis: str = "x"
+    use_dof: NDArray[np.integer] | None = None
+    n_dof: int | None = None
+    Vh: NDArray[np.floating] | None = None
 
     def __class_getitem__(cls, item):
         return cls
@@ -51,13 +57,20 @@ class Sensitivity:
                 updates[f] = getattr(grad0, f).copy()
             nominal = replace(grad0, **updates)
             object.__setattr__(self, "nominal", nominal)
+        if self.basis not in self.VALID_BASES:
+            raise ValueError(
+                f"basis must be one of {self.VALID_BASES}, got {self.basis!r}"
+            )
+        if self.basis == "f" and self.n_dof is None:
+            object.__setattr__(self, "n_dof", len(self.gradient))
+        if self.basis == "v" and self.Vh is None:
+            raise ValueError("Vh must be set when constructing State with basis='v'")
 
-    @property
-    def ndof(self) -> int:
-        return self.gradient.batch_shape[0]
-
-    def __len__(self) -> int:
-        return self.ndof
+    def _require(self, name: str):
+        val = getattr(self, name)
+        if val is None:
+            raise ValueError(f"{name} must be set on the State to use this conversion")
+        return val
 
     def __getitem__(self, idx):
         return self.gradient[idx]
@@ -70,9 +83,10 @@ class Sensitivity:
 
         Returns a new instance of the wrapped datatype.
         """
-        weights = getattr(state, self.steps.basis).value
-        if len(weights) != self.ndof:
-            raise ValueError(f"Expected {self.ndof} weights, got {len(weights)}")
+        # TODO: check that state conversion attrs match self conversion attrs
+        weights = getattr(state, self.basis).value
+        if len(weights) != len(self.gradient):
+            raise ValueError(f"Expected {len(self.gradient)} weights, got {len(weights)}")
 
         updates = {}
         for field_name in self.gradient._sensitivity_fields:
@@ -102,7 +116,7 @@ class Sensitivity:
         steps : State
             Step sizes used for the finite differences.
         """
-        ndof = len(perturbed_list)
+        n = len(perturbed_list)
 
         # Compute (perturbed - nominal) / step for each sensitivity field
         grad_arrays: dict[str, list] = {f: [] for f in nominal._sensitivity_fields}
@@ -119,14 +133,21 @@ class Sensitivity:
         # Broadcast ancillary array fields (e.g. vignetted for Spots)
         for f in getattr(nominal, "_broadcast_fields", ()):
             val = getattr(nominal, f)
-            updates[f] = np.broadcast_to(val, (ndof,) + val.shape).copy()
+            updates[f] = np.broadcast_to(val, (n,) + val.shape).copy()
 
         gradient = replace(nominal, **updates)
-        return cls(nominal=nominal, gradient=gradient, steps=steps)
+        return cls(
+            nominal=nominal,
+            gradient=gradient,
+            basis=steps.basis,
+            use_dof=steps.use_dof,
+            n_dof=steps.n_dof,
+            Vh=steps.Vh,
+        )
 
     def __repr__(self) -> str:
         tname = type(self.gradient).__name__
-        return f"Sensitivity[{tname}](ndof={self.ndof})"
+        return f"Sensitivity[{tname}](basis={self.basis!r})"
 
     # ------------------------------------------------------------------
     # Frame conversions

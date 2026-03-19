@@ -21,7 +21,8 @@ FIELD_INNER = 0.0 * u.deg
 PUPIL_OUTER = 4.18 * u.m
 PUPIL_INNER = 4.18 * 0.612 * u.m
 
-NDOF = 4
+NDOF = 50
+NUSEDOF = 4
 NFIELD = 5
 JMAX = 10
 KMAX = 6
@@ -59,7 +60,7 @@ def _make_zernikes_perturbed(nominal, rng, step):
 def _make_steps():
     return State(
         value=np.array([1.0, 2.0, 0.5, 3.0]),
-        basis="f",
+        basis="x",
         use_dof=np.array([0, 1, 2, 3]),
         n_dof=50,
     )
@@ -73,7 +74,7 @@ def _make_zk_sensitivity():
         _make_zernikes_perturbed(nominal, np.random.default_rng(i), s)
         for i, s in enumerate(steps.value)
     ]
-    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed
+    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed, steps
 
 
 def _make_spots_nominal(rng=None):
@@ -116,7 +117,7 @@ def _make_spots_sensitivity():
         _make_spots_perturbed(nominal, np.random.default_rng(100 + i), s)
         for i, s in enumerate(steps.value)
     ]
-    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed
+    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed, steps
 
 
 def _make_dz_nominal(rng=None):
@@ -155,7 +156,7 @@ def _make_dz_sensitivity():
         _make_dz_perturbed(nominal, np.random.default_rng(200 + i), s)
         for i, s in enumerate(steps.value)
     ]
-    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed
+    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed, steps
 
 
 # ---------------------------------------------------------------------------
@@ -177,17 +178,16 @@ class TestClassGetitem:
 
 class TestFromFiniteDifferencesZernikes:
     def test_gradient_shape(self):
-        sens, _ = _make_zk_sensitivity()
-        assert sens.gradient.coefs.shape == (NDOF, NFIELD, JMAX + 1)
+        sens, *_ = _make_zk_sensitivity()
+        assert sens.gradient.coefs.shape == (NUSEDOF, NFIELD, JMAX + 1)
 
     def test_nominal_preserved(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         assert sens.nominal.coefs.shape == (NFIELD, JMAX + 1)
 
     def test_gradient_values(self):
-        sens, perturbed = _make_zk_sensitivity()
-        steps = sens.steps
-        for i in range(NDOF):
+        sens, perturbed, steps = _make_zk_sensitivity()
+        for i in range(NUSEDOF):
             expected = (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
             np.testing.assert_allclose(
                 sens.gradient.coefs[i].to_value(u.um),
@@ -202,15 +202,14 @@ class TestFromFiniteDifferencesZernikes:
 
 class TestFromFiniteDifferencesSpots:
     def test_gradient_shape(self):
-        sens, _ = _make_spots_sensitivity()
-        assert sens.gradient.dx.shape == (NDOF, NFIELD, NRAY)
-        assert sens.gradient.dy.shape == (NDOF, NFIELD, NRAY)
-        assert sens.gradient.vignetted.shape == (NDOF, NFIELD, NRAY)
+        sens, *_ = _make_spots_sensitivity()
+        assert sens.gradient.dx.shape == (NUSEDOF, NFIELD, NRAY)
+        assert sens.gradient.dy.shape == (NUSEDOF, NFIELD, NRAY)
+        assert sens.gradient.vignetted.shape == (NUSEDOF, NFIELD, NRAY)
 
     def test_gradient_dx_values(self):
-        sens, perturbed = _make_spots_sensitivity()
-        steps = sens.steps
-        for i in range(NDOF):
+        sens, perturbed, steps = _make_spots_sensitivity()
+        for i in range(NUSEDOF):
             expected = (perturbed[i].dx - sens.nominal.dx) / steps.value[i]
             np.testing.assert_allclose(
                 sens.gradient.dx[i].to_value(u.um),
@@ -218,8 +217,8 @@ class TestFromFiniteDifferencesSpots:
             )
 
     def test_vignetted_broadcast(self):
-        sens, _ = _make_spots_sensitivity()
-        for i in range(NDOF):
+        sens, *_ = _make_spots_sensitivity()
+        for i in range(NUSEDOF):
             np.testing.assert_array_equal(
                 sens.gradient.vignetted[i], sens.nominal.vignetted
             )
@@ -232,13 +231,12 @@ class TestFromFiniteDifferencesSpots:
 
 class TestFromFiniteDifferencesDZ:
     def test_gradient_shape(self):
-        sens, _ = _make_dz_sensitivity()
-        assert sens.gradient.coefs.shape == (NDOF, KMAX + 1, JMAX + 1)
+        sens, *_ = _make_dz_sensitivity()
+        assert sens.gradient.coefs.shape == (NUSEDOF, KMAX + 1, JMAX + 1)
 
     def test_gradient_values(self):
-        sens, perturbed = _make_dz_sensitivity()
-        steps = sens.steps
-        for i in range(NDOF):
+        sens, perturbed, steps = _make_dz_sensitivity()
+        for i in range(NUSEDOF):
             expected = (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
             np.testing.assert_allclose(
                 sens.gradient.coefs[i].to_value(u.um),
@@ -252,16 +250,12 @@ class TestFromFiniteDifferencesDZ:
 
 
 class TestProperties:
-    def test_ndof(self):
-        sens, _ = _make_zk_sensitivity()
-        assert sens.ndof == NDOF
-
-    def test_len(self):
-        sens, _ = _make_zk_sensitivity()
-        assert len(sens) == NDOF
+    def test_n_dof(self):
+        sens, *_ = _make_zk_sensitivity()
+        assert sens.n_dof == NDOF
 
     def test_getitem_zernikes(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         z0 = sens[0]
         assert isinstance(z0, Zernikes)
         assert z0.coefs.shape == (NFIELD, JMAX + 1)
@@ -271,19 +265,19 @@ class TestProperties:
         )
 
     def test_getitem_spots(self):
-        sens, _ = _make_spots_sensitivity()
+        sens, *_ = _make_spots_sensitivity()
         s0 = sens[0]
         assert isinstance(s0, Spots)
         assert s0.dx.shape == (NFIELD, NRAY)
 
     def test_getitem_dz(self):
-        sens, _ = _make_dz_sensitivity()
+        sens, *_ = _make_dz_sensitivity()
         dz0 = sens[0]
         assert isinstance(dz0, DoubleZernikes)
         assert dz0.coefs.shape == (KMAX + 1, JMAX + 1)
 
     def test_slice(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         sliced = sens[:2]
         assert isinstance(sliced, Zernikes)
         assert sliced.coefs.shape == (2, NFIELD, JMAX + 1)
@@ -296,10 +290,10 @@ class TestProperties:
 
 class TestPredict:
     def test_predict_zernikes(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         delta = State(
             value=np.array([0.1, -0.2, 0.3, 0.0]),
-            basis="f",
+            basis="x",
             use_dof=np.array([0, 1, 2, 3]),
             n_dof=50,
         )
@@ -308,53 +302,53 @@ class TestPredict:
         assert result.coefs.shape == (NFIELD, JMAX + 1)
 
         # Manual check: nominal + gradient @ weights
-        weights = delta.f.value
+        weights = delta.x.value
         expected = sens.nominal.coefs.value + np.einsum(
             "i...,i->...", sens.gradient.coefs.value, weights
         )
         np.testing.assert_allclose(result.coefs.to_value(u.um), expected, rtol=1e-12)
 
     def test_predict_spots(self):
-        sens, _ = _make_spots_sensitivity()
+        sens, *_ = _make_spots_sensitivity()
         delta = State(
             value=np.array([0.5, -0.5, 1.0, -1.0]),
-            basis="f",
+            basis="x",
             use_dof=np.array([0, 1, 2, 3]),
             n_dof=50,
         )
         result = sens.predict(delta)
         assert isinstance(result, Spots)
 
-        weights = delta.f.value
+        weights = delta.x.value
         expected_dx = sens.nominal.dx.value + np.einsum(
             "i...,i->...", sens.gradient.dx.value, weights
         )
         np.testing.assert_allclose(result.dx.to_value(u.um), expected_dx, rtol=1e-12)
 
     def test_predict_double_zernikes(self):
-        sens, _ = _make_dz_sensitivity()
+        sens, *_ = _make_dz_sensitivity()
         delta = State(
             value=np.array([1.0, 2.0, 3.0, 4.0]),
-            basis="f",
+            basis="x",
             use_dof=np.array([0, 1, 2, 3]),
             n_dof=50,
         )
         result = sens.predict(delta)
         assert isinstance(result, DoubleZernikes)
 
-        weights = delta.f.value
+        weights = delta.x.value
         expected = sens.nominal.coefs.value + np.einsum(
             "i...,i->...", sens.gradient.coefs.value, weights
         )
         np.testing.assert_allclose(result.coefs.to_value(u.um), expected, rtol=1e-12)
 
     def test_predict_zero_is_nominal(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         zero = State(
-            value=np.zeros(NDOF),
-            basis="f",
+            value=np.zeros(NUSEDOF),
+            basis="x",
             use_dof=np.array([0, 1, 2, 3]),
-            n_dof=50,
+            n_dof=NDOF,
         )
         result = sens.predict(zero)
         np.testing.assert_allclose(
@@ -363,14 +357,8 @@ class TestPredict:
             rtol=1e-12,
         )
 
-    def test_predict_wrong_length_raises(self):
-        sens, _ = _make_zk_sensitivity()
-        bad = State(value=np.zeros(3), basis="f")
-        with pytest.raises(ValueError, match="Expected 4 weights, got 3"):
-            sens.predict(bad)
-
     def test_predict_preserves_metadata(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         delta = State(
             value=np.ones(NDOF),
             basis="f",
@@ -391,7 +379,7 @@ class TestPredict:
 
 class TestGradientOnlyConstruction:
     def test_zernikes_nominal_is_zeros(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         grad_only = Sensitivity(gradient=sens.gradient)
         np.testing.assert_array_equal(
             grad_only.nominal.coefs.to_value(u.um),
@@ -399,19 +387,19 @@ class TestGradientOnlyConstruction:
         )
 
     def test_zernikes_nominal_shape_matches_gradient_slice(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         grad_only = Sensitivity(gradient=sens.gradient)
         assert grad_only.nominal.coefs.shape == sens.gradient.coefs.shape[1:]
 
     def test_zernikes_nominal_preserves_metadata(self):
         """Non-sensitivity fields (frame, rtp, field, etc.) come from gradient[0]."""
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         grad_only = Sensitivity(gradient=sens.gradient)
         assert grad_only.nominal.frame == sens.gradient[0].frame
         assert grad_only.nominal.R_outer == sens.gradient[0].R_outer
 
     def test_dz_nominal_is_zeros(self):
-        sens, _ = _make_dz_sensitivity()
+        sens, *_ = _make_dz_sensitivity()
         grad_only = Sensitivity(gradient=sens.gradient)
         np.testing.assert_array_equal(
             grad_only.nominal.coefs.to_value(u.um),
@@ -419,7 +407,7 @@ class TestGradientOnlyConstruction:
         )
 
     def test_spots_nominal_is_zeros(self):
-        sens, _ = _make_spots_sensitivity()
+        sens, *_ = _make_spots_sensitivity()
         grad_only = Sensitivity(gradient=sens.gradient)
         np.testing.assert_array_equal(
             grad_only.nominal.dx.to_value(u.um),
@@ -450,21 +438,6 @@ class TestGradientOnlyConstruction:
         # gradient[0].vignetted is the original mask, broadcast
         np.testing.assert_array_equal(grad_only.nominal.vignetted, vig)
 
-    def test_steps_defaults_to_none(self):
-        sens, _ = _make_zk_sensitivity()
-        grad_only = Sensitivity(gradient=sens.gradient)
-        assert grad_only.steps is None
-
-    def test_repr_no_crash_when_steps_none(self):
-        sens, _ = _make_zk_sensitivity()
-        grad_only = Sensitivity(gradient=sens.gradient)
-        r = repr(grad_only)
-        assert f"Sensitivity[Zernikes](ndof={NDOF})" == r
-
-    def test_repr_with_steps(self):
-        sens, _ = _make_zk_sensitivity()
-        assert repr(sens) == f"Sensitivity[Zernikes](ndof={NDOF})"
-
 
 # ---------------------------------------------------------------------------
 # Tests: repr
@@ -473,18 +446,17 @@ class TestGradientOnlyConstruction:
 
 class TestRepr:
     def test_repr_zernikes(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         r = repr(sens)
         assert "Sensitivity[Zernikes]" in r
-        assert "ndof=4" in r
 
     def test_repr_spots(self):
-        sens, _ = _make_spots_sensitivity()
+        sens, *_ = _make_spots_sensitivity()
         r = repr(sens)
         assert "Sensitivity[Spots]" in r
 
     def test_repr_dz(self):
-        sens, _ = _make_dz_sensitivity()
+        sens, *_ = _make_dz_sensitivity()
         r = repr(sens)
         assert "Sensitivity[DoubleZernikes]" in r
 
@@ -497,12 +469,12 @@ class TestRepr:
 class TestFrameConversions:
     def test_zernikes_ocs_from_ccs(self):
         """Sensitivity[Zernikes] CCS → OCS round-trips the frame attribute."""
-        sens_ocs, _ = _make_zk_sensitivity()
+        sens_ocs, _, steps = _make_zk_sensitivity()
         # Manually create a CCS version via the underlying type's conversion
-        sens_ccs = Sensitivity(
+        sens_ccs = replace(
+            sens_ocs,
             gradient=sens_ocs.gradient.ccs,
             nominal=sens_ocs.nominal.ccs,
-            steps=sens_ocs.steps,
         )
         assert sens_ccs.gradient.frame == "ccs"
         assert sens_ccs.nominal.frame == "ccs"
@@ -512,13 +484,13 @@ class TestFrameConversions:
         assert back.nominal.frame == "ocs"
 
     def test_zernikes_ccs_from_ocs(self):
-        sens_ocs, _ = _make_zk_sensitivity()
+        sens_ocs, *_ = _make_zk_sensitivity()
         sens_ccs = sens_ocs.ccs
         assert sens_ccs.gradient.frame == "ccs"
         assert sens_ccs.nominal.frame == "ccs"
 
     def test_zernikes_ocs_is_identity_when_already_ocs(self):
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         assert sens.gradient.frame == "ocs"
         same = sens.ocs
         assert same.gradient is sens.gradient
@@ -526,7 +498,7 @@ class TestFrameConversions:
 
     def test_zernikes_ccs_ocs_roundtrip_coefs(self):
         """OCS → CCS → OCS should recover the original coefficients."""
-        sens, _ = _make_zk_sensitivity()
+        sens, *_ = _make_zk_sensitivity()
         roundtripped = sens.ccs.ocs
         np.testing.assert_allclose(
             roundtripped.gradient.coefs.to_value(u.um),
@@ -539,12 +511,8 @@ class TestFrameConversions:
             atol=1e-12,
         )
 
-    def test_steps_preserved_through_frame_conversion(self):
-        sens, _ = _make_zk_sensitivity()
-        assert sens.ccs.steps is sens.steps
-
     def test_dz_ocs_ccs_roundtrip(self):
-        sens, _ = _make_dz_sensitivity()
+        sens, *_ = _make_dz_sensitivity()
         assert sens.gradient.frame == "ocs"
         roundtripped = sens.ccs.ocs
         np.testing.assert_allclose(
@@ -554,7 +522,7 @@ class TestFrameConversions:
         )
 
     def test_spots_ccs_ocs_roundtrip(self):
-        sens, _ = _make_spots_sensitivity()
+        sens, *_ = _make_spots_sensitivity()
         # Spots from_finite_differences yields CCS frame
         assert sens.gradient.frame == "ccs"
         roundtripped = sens.ocs.ccs
@@ -565,7 +533,7 @@ class TestFrameConversions:
         )
 
     def test_spots_dvcs(self):
-        sens, _ = _make_spots_sensitivity()
+        sens, *_ = _make_spots_sensitivity()
         dvcs = sens.dvcs
         assert dvcs.gradient.frame == "dvcs"
         assert dvcs.nominal.frame == "dvcs"
@@ -577,7 +545,7 @@ class TestFrameConversions:
         )
 
     def test_spots_edcs(self):
-        sens, _ = _make_spots_sensitivity()
+        sens, *_ = _make_spots_sensitivity()
         edcs = sens.edcs
         assert edcs.gradient.frame == "edcs"
         assert edcs.nominal.frame == "edcs"

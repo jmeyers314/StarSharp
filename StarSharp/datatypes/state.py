@@ -60,8 +60,13 @@ class State:
             raise ValueError(
                 f"basis must be one of {self.VALID_BASES}, got {self.basis!r}"
             )
-        if self.basis == "f" and self.n_dof is None:
-            object.__setattr__(self, "n_dof", len(self.value))
+        if self.basis == "f":
+            if self.n_dof is None:
+                object.__setattr__(self, "n_dof", len(self.value))
+            if len(self.value) != self.n_dof:
+                raise ValueError(
+                    f"Length of value ({len(self.value)}) does not match n_dof ({self.n_dof})"
+                )
         if self.basis == "v" and self.Vh is None:
             raise ValueError("Vh must be set when constructing State with basis='v'")
 
