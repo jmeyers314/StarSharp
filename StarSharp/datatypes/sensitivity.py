@@ -185,3 +185,83 @@ class Sensitivity:
     def edcs(self) -> Sensitivity:
         """Sensitivity with gradient and nominal in the EDCS frame (Spots only)."""
         return self._apply_frame("edcs")
+
+    def _apply_basis(self, target: str) -> "Sensitivity":
+        """Return a copy of ``self`` with ``gradient`` expressed in *target* basis.
+
+        Correctly handles observable-typed fields by operating on the raw
+        ``.value`` arrays and reassembling with ``replace()``.  Re-broadcasts
+        ancillary fields listed in ``_broadcast_fields`` (e.g. ``vignetted``
+        on ``Spots``) from ``self.nominal`` with the new leading dimension.
+        """
+        if self.basis == target:
+            return self
+
+        # ------------------------------------------------------------------ #
+        # Helpers: convert a raw ndarray between self.basis and target        #
+        # ------------------------------------------------------------------ #
+
+        def _to_x(arr):
+            """Convert arr from self.basis to x-basis (nactive leading dim)."""
+            if self.basis == "x":
+                return arr
+            if self.basis == "f":
+                use_dof = self._require("use_dof")
+                return arr[use_dof]
+            # "v": (nkeep, *obs) → (nactive, *obs)  via  result[j]=Σ_i Vh[i,j]*arr[i]
+            Vh = self._require("Vh")
+            return np.einsum("ij,i...->j...", Vh, arr)
+
+        def _from_x(arr):
+            """Convert arr from x-basis to target basis."""
+            if target == "x":
+                return arr
+            if target == "f":
+                use_dof = self._require("use_dof")
+                n_dof = self._require("n_dof")
+                out = np.zeros((n_dof,) + arr.shape[1:], dtype=arr.dtype)
+                out[use_dof] = arr
+                return out
+            # "v": (nactive, *obs) → (nkeep, *obs)  via  result[i]=Σ_j Vh[i,j]*arr[j]
+            Vh = self._require("Vh")
+            return np.einsum("ij,j...->i...", Vh, arr)
+
+        # ------------------------------------------------------------------ #
+        # New leading dimension size                                           #
+        # ------------------------------------------------------------------ #
+        if target == "x":
+            new_n = len(self._require("use_dof"))
+        elif target == "f":
+            new_n = self._require("n_dof")
+        else:  # "v"
+            new_n = self._require("Vh").shape[0]
+
+        # ------------------------------------------------------------------ #
+        # Transform each sensitivity field                                     #
+        # ------------------------------------------------------------------ #
+        updates: dict = {}
+        for f in type(self.gradient)._sensitivity_fields:
+            q = getattr(self.gradient, f)
+            updates[f] = _from_x(_to_x(q.value)) * q.unit
+
+        # Re-broadcast ancillary fields (e.g. vignetted on Spots) from nominal
+        for f in getattr(type(self.gradient), "_broadcast_fields", ()):
+            val = getattr(self.nominal, f)
+            updates[f] = np.broadcast_to(val, (new_n,) + val.shape).copy()
+
+        return replace(self, gradient=replace(self.gradient, **updates), basis=target)
+
+    @property
+    def x(self) -> "Sensitivity":
+        """Sensitivity with gradient in the active-DOF (x) basis."""
+        return self._apply_basis("x")
+
+    @property
+    def f(self) -> "Sensitivity":
+        """Sensitivity with gradient in the full-DOF (f) basis."""
+        return self._apply_basis("f")
+
+    @property
+    def v(self) -> "Sensitivity":
+        """Sensitivity with gradient in the SVD-truncated (v) basis."""
+        return self._apply_basis("v")

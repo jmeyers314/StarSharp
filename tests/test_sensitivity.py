@@ -549,3 +549,189 @@ class TestFrameConversions:
         edcs = sens.edcs
         assert edcs.gradient.frame == "edcs"
         assert edcs.nominal.frame == "edcs"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for basis-conversion tests
+# ---------------------------------------------------------------------------
+
+NKEEP = 3
+
+
+def _make_Vh_rect():
+    """Rectangular orthogonal Vh of shape (NKEEP, NUSEDOF)."""
+    rng = np.random.default_rng(123)
+    A = rng.standard_normal((NUSEDOF, NUSEDOF))
+    Q, _ = np.linalg.qr(A)
+    return Q[:NKEEP]  # (NKEEP, NUSEDOF)
+
+
+def _make_Vh_square():
+    """Square orthogonal Vh of shape (NUSEDOF, NUSEDOF)."""
+    rng = np.random.default_rng(123)
+    A = rng.standard_normal((NUSEDOF, NUSEDOF))
+    Q, _ = np.linalg.qr(A)
+    return Q  # (NUSEDOF, NUSEDOF)
+
+
+# ---------------------------------------------------------------------------
+# Tests: basis conversions
+# ---------------------------------------------------------------------------
+
+
+class TestBasisConversions:
+    # --- x unchanged ---
+
+    def test_x_identity(self):
+        sens, *_ = _make_zk_sensitivity()
+        assert sens.x is sens
+
+    # --- x → f ---
+
+    def test_x_to_f_gradient_shape_zk(self):
+        sens, *_ = _make_zk_sensitivity()
+        sf = sens.f
+        assert sf.basis == "f"
+        assert sf.gradient.coefs.shape == (NDOF, NFIELD, JMAX + 1)
+
+    def test_x_to_f_values_at_use_dof(self):
+        """Rows at use_dof in f-basis match the original x-basis rows."""
+        sens, *_ = _make_zk_sensitivity()
+        sf = sens.f
+        use_dof = sens.use_dof
+        np.testing.assert_allclose(
+            sf.gradient.coefs[use_dof].to_value(u.um),
+            sens.gradient.coefs.to_value(u.um),
+        )
+
+    def test_x_to_f_zeros_outside_use_dof(self):
+        """All rows outside use_dof are zero in f-basis."""
+        sens, *_ = _make_zk_sensitivity()
+        sf = sens.f
+        mask = np.ones(NDOF, dtype=bool)
+        mask[sens.use_dof] = False
+        np.testing.assert_array_equal(
+            sf.gradient.coefs[mask].to_value(u.um),
+            np.zeros((NDOF - NUSEDOF, NFIELD, JMAX + 1)),
+        )
+
+    def test_x_to_f_x_roundtrip_zk(self):
+        """x → f → x recovers the original gradient exactly."""
+        sens, *_ = _make_zk_sensitivity()
+        np.testing.assert_allclose(
+            sens.f.x.gradient.coefs.to_value(u.um),
+            sens.gradient.coefs.to_value(u.um),
+        )
+
+    def test_x_to_f_basis_attr(self):
+        sens, *_ = _make_zk_sensitivity()
+        assert sens.f.basis == "f"
+        assert sens.f.x.basis == "x"
+
+    def test_x_to_f_nominal_unchanged(self):
+        """Nominal is not modified by basis conversion."""
+        sens, *_ = _make_zk_sensitivity()
+        np.testing.assert_allclose(
+            sens.f.nominal.coefs.to_value(u.um),
+            sens.nominal.coefs.to_value(u.um),
+        )
+
+    # --- x → f for Spots (vignetted re-broadcast) ---
+
+    def test_x_to_f_spots_gradient_shape(self):
+        sens, *_ = _make_spots_sensitivity()
+        sf = sens.f
+        assert sf.gradient.dx.shape == (NDOF, NFIELD, NRAY)
+        assert sf.gradient.dy.shape == (NDOF, NFIELD, NRAY)
+
+    def test_x_to_f_spots_vignetted_shape(self):
+        sens, *_ = _make_spots_sensitivity()
+        assert sens.f.gradient.vignetted.shape == (NDOF, NFIELD, NRAY)
+
+    def test_x_to_f_spots_vignetted_values(self):
+        """All rows of vignetted in f-basis equal nominal.vignetted."""
+        sens, *_ = _make_spots_sensitivity()
+        sf = sens.f
+        for i in range(NDOF):
+            np.testing.assert_array_equal(
+                sf.gradient.vignetted[i], sens.nominal.vignetted
+            )
+
+    def test_x_to_f_x_roundtrip_spots(self):
+        sens, *_ = _make_spots_sensitivity()
+        np.testing.assert_allclose(
+            sens.f.x.gradient.dx.to_value(u.um),
+            sens.gradient.dx.to_value(u.um),
+        )
+        np.testing.assert_allclose(
+            sens.f.x.gradient.dy.to_value(u.um),
+            sens.gradient.dy.to_value(u.um),
+        )
+
+    # --- x → v ---
+
+    def test_x_to_v_gradient_shape_zk(self):
+        sens, *_ = _make_zk_sensitivity()
+        Vh = _make_Vh_rect()
+        sv = replace(sens, Vh=Vh).v
+        assert sv.basis == "v"
+        assert sv.gradient.coefs.shape == (NKEEP, NFIELD, JMAX + 1)
+
+    def test_x_to_v_values_zk(self):
+        """Gradient in v-basis equals Vh @ x-gradient along DOF axis."""
+        sens, *_ = _make_zk_sensitivity()
+        Vh = _make_Vh_rect()
+        sv = replace(sens, Vh=Vh).v
+        expected = np.einsum("ij,j...->i...", Vh, sens.gradient.coefs.to_value(u.um))
+        np.testing.assert_allclose(
+            sv.gradient.coefs.to_value(u.um), expected, rtol=1e-12
+        )
+
+    def test_x_v_x_roundtrip_square_Vh_zk(self):
+        """With a square orthogonal Vh, x → v → x is exact."""
+        sens, *_ = _make_zk_sensitivity()
+        Vh = _make_Vh_square()
+        roundtripped = replace(sens, Vh=Vh).v.x
+        np.testing.assert_allclose(
+            roundtripped.gradient.coefs.to_value(u.um),
+            sens.gradient.coefs.to_value(u.um),
+            rtol=1e-12,
+        )
+
+    def test_v_to_x_gradient_shape(self):
+        """Starting from v-basis, .x gives shape (NUSEDOF, *obs)."""
+        sens, *_ = _make_zk_sensitivity()
+        Vh = _make_Vh_rect()
+        sv = replace(sens, Vh=Vh).v  # shape (NKEEP, NFIELD, JMAX+1)
+        sx = sv.x
+        assert sx.basis == "x"
+        assert sx.gradient.coefs.shape == (NUSEDOF, NFIELD, JMAX + 1)
+
+    def test_x_to_v_spots_vignetted_shape(self):
+        """Spots vignetted is correctly re-broadcast when converting to v."""
+        sens, *_ = _make_spots_sensitivity()
+        Vh = _make_Vh_rect()
+        sv = replace(sens, Vh=Vh).v
+        assert sv.gradient.vignetted.shape == (NKEEP, NFIELD, NRAY)
+        for i in range(NKEEP):
+            np.testing.assert_array_equal(
+                sv.gradient.vignetted[i], sens.nominal.vignetted
+            )
+
+    # --- f → x (start from f-basis sensitivity) ---
+
+    def test_f_to_x_gradient_shape_dz(self):
+        """DoubleZernikes: f-basis → x recovers (NUSEDOF, K+1, J+1) shape."""
+        sens, *_ = _make_dz_sensitivity()
+        sf = sens.f  # (NDOF, KMAX+1, JMAX+1)
+        sx = sf.x
+        assert sx.basis == "x"
+        assert sx.gradient.coefs.shape == (NUSEDOF, KMAX + 1, JMAX + 1)
+
+    def test_f_to_x_values_dz(self):
+        sens, *_ = _make_dz_sensitivity()
+        sx = sens.f.x
+        np.testing.assert_allclose(
+            sx.gradient.coefs.to_value(u.um),
+            sens.gradient.coefs.to_value(u.um),
+        )
