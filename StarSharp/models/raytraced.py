@@ -327,6 +327,7 @@ class RaytracedOpticalModel:
         field: FieldCoords,
         jmax: int = 28,
         rings: int = 10,
+        algorithm: Literal["ta", "gq"] = "gq",
     ) -> Zernikes:
         """Compute Zernike wavefront coefficients.
 
@@ -339,8 +340,11 @@ class RaytracedOpticalModel:
         jmax : int
             Maximum Noll index (default: 28).
         rings : int
-            Number of radial quadrature rings for ``batoid.zernikeGQ``
+            Number of radial rings for computing zernikes.
             (default: 10).
+        algorithm : Literal["ta", "gq"]
+            Algorithm to use for computing zernikes.  "ta" uses the
+            transverse aberration approach, "gq" uses Gaussian quadrature.
 
         Returns
         -------
@@ -375,19 +379,35 @@ class RaytracedOpticalModel:
                 zk.append(np.full(jmax + 1, np.nan))
                 continue
             telescope = builder.build_det(detnum)
-            try:
-                zkgq = batoid.zernikeGQ(
-                    telescope,
-                    theta_x=thx.to_value(u.rad),
-                    theta_y=thy.to_value(u.rad),
-                    wavelength=self.wavelength.to_value(u.m),
-                    rings=rings,
-                    jmax=jmax,
-                    eps=PUPIL_INNER / PUPIL_OUTER,
-                )
-            except ValueError:
-                zkgq = np.full(jmax + 1, np.nan)
-            zk.append(zkgq)
+            if algorithm == "gq":
+                try:
+                    zk1 = batoid.zernikeGQ(
+                        telescope,
+                        theta_x=thx.to_value(u.rad),
+                        theta_y=thy.to_value(u.rad),
+                        wavelength=self.wavelength.to_value(u.m),
+                        rings=rings,
+                        jmax=jmax,
+                        eps=PUPIL_INNER / PUPIL_OUTER,
+                    )
+                except ValueError:
+                    zk1 = np.full(jmax + 1, np.nan)
+            elif algorithm == "ta":
+                try:
+                    zk1 = batoid.zernikeTA(
+                        telescope,
+                        theta_x=thx.to_value(u.rad),
+                        theta_y=thy.to_value(u.rad),
+                        wavelength=self.wavelength.to_value(u.m),
+                        nrad=rings,
+                        naz=int(2 * np.pi * rings / (1 - PUPIL_INNER / PUPIL_OUTER)),
+                        jmax=jmax,
+                        eps=PUPIL_INNER / PUPIL_OUTER,
+                        focal_length=10.31,
+                    )
+                except ValueError:
+                    zk1 = np.full(jmax + 1, np.nan)
+            zk.append(zk1)
 
         coefs = np.array(zk, dtype=float).reshape(batch_shape + (nfield, jmax + 1))
         return Zernikes(
@@ -514,6 +534,7 @@ class RaytracedOpticalModel:
         steps: State,
         jmax: int = 28,
         rings: int = 10,
+        algorithm: Literal["ta", "gq"] = "gq",
         offset: State | None = None,
     ) -> Sensitivity:
         """Compute the Zernike wavefront sensitivity matrix via finite differences.
@@ -533,6 +554,9 @@ class RaytracedOpticalModel:
             Maximum Noll index (default: 28).
         rings : int
             Quadrature rings for :meth:`zernikes` (default: 10).
+        algorithm : Literal["ta", "gq"]
+            Algorithm to use for computing zernikes.  "ta" uses the
+            transverse aberration approach, "gq" uses Gaussian quadrature.
         offset : State or None
             Nominal (unperturbed) alignment state.  Defaults to zeros.
 
@@ -570,6 +594,7 @@ class RaytracedOpticalModel:
                     field=field,
                     jmax=jmax,
                     rings=rings,
+                    algorithm=algorithm,
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)
@@ -580,6 +605,7 @@ class RaytracedOpticalModel:
         steps: State,
         nrad: int = 10,
         offset: State | None = None,
+        reference: Literal["chief", "mean", "ring"] = "chief",
     ) -> Sensitivity:
         """Compute the spot-diagram sensitivity matrix via finite differences.
 
@@ -596,6 +622,10 @@ class RaytracedOpticalModel:
             Pupil sampling rings for :meth:`spots` (default: 10).
         offset : State or None
             Nominal alignment state.  Defaults to zeros.
+        reference: Literal["chief", "mean", "ring"] = "chief"
+            Whether to center spot diagrams on the chief ray intersection,
+            the mean intersection of all unvignetted rays, or the mean of a
+            ring of (possibly vignetted) rays.
 
         Returns
         -------
@@ -611,6 +641,7 @@ class RaytracedOpticalModel:
             state=offset,
             field=field,
             nrad=nrad,
+            reference=reference,
         )
 
         perturbed = []
@@ -629,6 +660,7 @@ class RaytracedOpticalModel:
                     state=offset + dstate,
                     field=field,
                     nrad=nrad,
+                    reference=reference,
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)

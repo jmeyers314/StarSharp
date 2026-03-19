@@ -2,7 +2,6 @@
 
 
 ## High Priority
-- [ ] Add zernikeTA option in RaytracedOpticalModel.zernikes
 - [ ] Check that sensitivity in zernikeGQ is consistent with sensitivity in zernikeTA
 - [ ] Add fitting for Zernikes -> State
 
@@ -12,9 +11,8 @@
 ## Low Priority
 
 
-
-
 ## Resolved
+- [x] Add zernikeTA option in RaytracedOpticalModel.zernikes
 - [x] Verify that batoid.RayVector.fromStop() is independent of state.
     See sandbox/verify_fromStop_indep.py
 - [x] Add chief/mean option in RaytracedOpticalModel.spots
