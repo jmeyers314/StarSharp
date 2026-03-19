@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -85,22 +85,10 @@ class State:
             return self
         if self.basis == "f":
             use_dof = self._require("use_dof")
-            return State(
-                value=self.value[use_dof],
-                basis="x",
-                use_dof=self.use_dof,
-                n_dof=self.n_dof,
-                Vh=self.Vh,
-            )
+            return replace(self, value=self.value[use_dof], basis="x")
         # basis == "v"
         Vh = self._require("Vh")
-        return State(
-            value=self.value @ Vh,
-            basis="x",
-            use_dof=self.use_dof,
-            n_dof=self.n_dof,
-            Vh=self.Vh,
-        )
+        return replace(self, value=self.value @ Vh, basis="x")
 
     @property
     def f(self) -> State:
@@ -112,13 +100,7 @@ class State:
         n_dof = self._require("n_dof")
         fvalue = np.zeros(n_dof, dtype=float)
         fvalue[use_dof] = xs.value
-        return State(
-            value=fvalue,
-            basis="f",
-            use_dof=self.use_dof,
-            n_dof=n_dof,
-            Vh=self.Vh,
-        )
+        return replace(self, value=fvalue, basis="f")
 
     @property
     def v(self) -> State:
@@ -127,13 +109,7 @@ class State:
             return self
         Vh = self._require("Vh")
         xs = self.x  # go through x-basis
-        return State(
-            value=xs.value @ Vh.T,
-            basis="v",
-            use_dof=self.use_dof,
-            n_dof=self.n_dof,
-            Vh=self.Vh,
-        )
+        return replace(self, value=xs.value @ Vh.T, basis="v")
 
     def __repr__(self) -> str:
         return f"State({self.value!r}, basis={self.basis!r})"
@@ -163,19 +139,17 @@ class State:
                     and other.Vh is not None
                     and np.array_equal(self.Vh, other.Vh)
                 ):
-                    # Same use_dof, n_dof, and Vh: add in v-basis
-                    return State(
-                        value=self.v.value + other.v.value,
-                        basis="v",
-                        use_dof=self.use_dof,
-                        n_dof=self.n_dof,
-                        Vh=self.Vh,
+                    # Same use_dof, n_dof, and Vh: add in f-basis
+                    return replace(
+                        self,
+                        value=self.f.value + other.f.value,
+                        basis="f",
                     )
 
         return State(
             value=self.f.value + other.f.value,
             basis="f",
-            n_dof=self.n_dof if self.n_dof is not None else None,
+            n_dof=self.n_dof
         )
 
 
