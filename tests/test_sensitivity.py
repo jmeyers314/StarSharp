@@ -487,3 +487,97 @@ class TestRepr:
         sens, _ = _make_dz_sensitivity()
         r = repr(sens)
         assert "Sensitivity[DoubleZernikes]" in r
+
+
+# ---------------------------------------------------------------------------
+# Tests: frame conversions
+# ---------------------------------------------------------------------------
+
+
+class TestFrameConversions:
+    def test_zernikes_ocs_from_ccs(self):
+        """Sensitivity[Zernikes] CCS → OCS round-trips the frame attribute."""
+        sens_ocs, _ = _make_zk_sensitivity()
+        # Manually create a CCS version via the underlying type's conversion
+        sens_ccs = Sensitivity(
+            gradient=sens_ocs.gradient.ccs,
+            nominal=sens_ocs.nominal.ccs,
+            steps=sens_ocs.steps,
+        )
+        assert sens_ccs.gradient.frame == "ccs"
+        assert sens_ccs.nominal.frame == "ccs"
+
+        back = sens_ccs.ocs
+        assert back.gradient.frame == "ocs"
+        assert back.nominal.frame == "ocs"
+
+    def test_zernikes_ccs_from_ocs(self):
+        sens_ocs, _ = _make_zk_sensitivity()
+        sens_ccs = sens_ocs.ccs
+        assert sens_ccs.gradient.frame == "ccs"
+        assert sens_ccs.nominal.frame == "ccs"
+
+    def test_zernikes_ocs_is_identity_when_already_ocs(self):
+        sens, _ = _make_zk_sensitivity()
+        assert sens.gradient.frame == "ocs"
+        same = sens.ocs
+        assert same.gradient is sens.gradient
+        assert same.nominal is sens.nominal
+
+    def test_zernikes_ccs_ocs_roundtrip_coefs(self):
+        """OCS → CCS → OCS should recover the original coefficients."""
+        sens, _ = _make_zk_sensitivity()
+        roundtripped = sens.ccs.ocs
+        np.testing.assert_allclose(
+            roundtripped.gradient.coefs.to_value(u.um),
+            sens.gradient.coefs.to_value(u.um),
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            roundtripped.nominal.coefs.to_value(u.um),
+            sens.nominal.coefs.to_value(u.um),
+            atol=1e-12,
+        )
+
+    def test_steps_preserved_through_frame_conversion(self):
+        sens, _ = _make_zk_sensitivity()
+        assert sens.ccs.steps is sens.steps
+
+    def test_dz_ocs_ccs_roundtrip(self):
+        sens, _ = _make_dz_sensitivity()
+        assert sens.gradient.frame == "ocs"
+        roundtripped = sens.ccs.ocs
+        np.testing.assert_allclose(
+            roundtripped.gradient.coefs.to_value(u.um),
+            sens.gradient.coefs.to_value(u.um),
+            atol=1e-12,
+        )
+
+    def test_spots_ccs_ocs_roundtrip(self):
+        sens, _ = _make_spots_sensitivity()
+        # Spots from_finite_differences yields CCS frame
+        assert sens.gradient.frame == "ccs"
+        roundtripped = sens.ocs.ccs
+        np.testing.assert_allclose(
+            roundtripped.gradient.dx.to_value(u.um),
+            sens.gradient.dx.to_value(u.um),
+            atol=1e-12,
+        )
+
+    def test_spots_dvcs(self):
+        sens, _ = _make_spots_sensitivity()
+        dvcs = sens.dvcs
+        assert dvcs.gradient.frame == "dvcs"
+        assert dvcs.nominal.frame == "dvcs"
+        # In DVCS, dx and dy are swapped relative to CCS
+        np.testing.assert_allclose(
+            dvcs.gradient.dx.to_value(u.um),
+            sens.gradient.dy.to_value(u.um),
+            atol=1e-12,
+        )
+
+    def test_spots_edcs(self):
+        sens, _ = _make_spots_sensitivity()
+        edcs = sens.edcs
+        assert edcs.gradient.frame == "edcs"
+        assert edcs.nominal.frame == "edcs"

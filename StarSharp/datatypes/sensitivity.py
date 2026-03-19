@@ -127,3 +127,40 @@ class Sensitivity:
     def __repr__(self) -> str:
         tname = type(self.gradient).__name__
         return f"Sensitivity[{tname}](ndof={self.ndof})"
+
+    # ------------------------------------------------------------------
+    # Frame conversions
+    # ------------------------------------------------------------------
+
+    @property
+    def frame(self) -> str:
+        """Coordinate frame of the gradient and nominal (e.g. 'ocs', 'ccs')."""
+        return self.gradient.frame
+
+    def _apply_frame(self, frame: str) -> Sensitivity:
+        """Return a new Sensitivity with gradient and nominal converted to *frame*."""
+        return replace(
+            self,
+            gradient=getattr(self.gradient, frame),
+            nominal=getattr(self.nominal, frame),
+        )
+
+    @property
+    def ocs(self) -> Sensitivity:
+        """Sensitivity with gradient and nominal in the OCS frame."""
+        return self._apply_frame("ocs")
+
+    @property
+    def ccs(self) -> Sensitivity:
+        """Sensitivity with gradient and nominal in the CCS frame."""
+        return self._apply_frame("ccs")
+
+    @property
+    def dvcs(self) -> Sensitivity:
+        """Sensitivity with gradient and nominal in the DVCS frame (Spots only)."""
+        return self._apply_frame("dvcs")
+
+    @property
+    def edcs(self) -> Sensitivity:
+        """Sensitivity with gradient and nominal in the EDCS frame (Spots only)."""
+        return self._apply_frame("edcs")
