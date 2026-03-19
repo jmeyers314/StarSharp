@@ -1,6 +1,7 @@
 """Tests for the Sensitivity class."""
 
 from __future__ import annotations
+from dataclasses import replace
 
 import astropy.units as u
 import numpy as np
@@ -384,6 +385,88 @@ class TestPredict:
 
 
 # ---------------------------------------------------------------------------
+# Tests: gradient-only construction (nominal=None)
+# ---------------------------------------------------------------------------
+
+
+class TestGradientOnlyConstruction:
+    def test_zernikes_nominal_is_zeros(self):
+        sens, _ = _make_zk_sensitivity()
+        grad_only = Sensitivity(gradient=sens.gradient)
+        np.testing.assert_array_equal(
+            grad_only.nominal.coefs.to_value(u.um),
+            np.zeros((NFIELD, JMAX + 1)),
+        )
+
+    def test_zernikes_nominal_shape_matches_gradient_slice(self):
+        sens, _ = _make_zk_sensitivity()
+        grad_only = Sensitivity(gradient=sens.gradient)
+        assert grad_only.nominal.coefs.shape == sens.gradient.coefs.shape[1:]
+
+    def test_zernikes_nominal_preserves_metadata(self):
+        """Non-sensitivity fields (frame, rtp, field, etc.) come from gradient[0]."""
+        sens, _ = _make_zk_sensitivity()
+        grad_only = Sensitivity(gradient=sens.gradient)
+        assert grad_only.nominal.frame == sens.gradient[0].frame
+        assert grad_only.nominal.R_outer == sens.gradient[0].R_outer
+
+    def test_dz_nominal_is_zeros(self):
+        sens, _ = _make_dz_sensitivity()
+        grad_only = Sensitivity(gradient=sens.gradient)
+        np.testing.assert_array_equal(
+            grad_only.nominal.coefs.to_value(u.um),
+            np.zeros((KMAX + 1, JMAX + 1)),
+        )
+
+    def test_spots_nominal_is_zeros(self):
+        sens, _ = _make_spots_sensitivity()
+        grad_only = Sensitivity(gradient=sens.gradient)
+        np.testing.assert_array_equal(
+            grad_only.nominal.dx.to_value(u.um),
+            np.zeros((NFIELD, NRAY)),
+        )
+        np.testing.assert_array_equal(
+            grad_only.nominal.dy.to_value(u.um),
+            np.zeros((NFIELD, NRAY)),
+        )
+
+    def test_spots_nominal_vignetted_copied_from_gradient(self):
+        """vignetted is a broadcast field — should be copied not zeroed."""
+        rng = np.random.default_rng(42)
+        nominal = _make_spots_nominal(rng)
+        # Mark some rays as vignetted
+        vig = nominal.vignetted.copy()
+        vig[0, 0] = True
+        vig[2, 5] = True
+        nominal = replace(nominal, vignetted=vig)
+        steps = _make_steps()
+        perturbed = [
+            _make_spots_perturbed(nominal, np.random.default_rng(100 + i), s)
+            for i, s in enumerate(steps.value)
+        ]
+        sens = Sensitivity.from_finite_differences(nominal, perturbed, steps)
+
+        grad_only = Sensitivity(gradient=sens.gradient)
+        # gradient[0].vignetted is the original mask, broadcast
+        np.testing.assert_array_equal(grad_only.nominal.vignetted, vig)
+
+    def test_steps_defaults_to_none(self):
+        sens, _ = _make_zk_sensitivity()
+        grad_only = Sensitivity(gradient=sens.gradient)
+        assert grad_only.steps is None
+
+    def test_repr_no_crash_when_steps_none(self):
+        sens, _ = _make_zk_sensitivity()
+        grad_only = Sensitivity(gradient=sens.gradient)
+        r = repr(grad_only)
+        assert f"Sensitivity[Zernikes](ndof={NDOF})" == r
+
+    def test_repr_with_steps(self):
+        sens, _ = _make_zk_sensitivity()
+        assert repr(sens) == f"Sensitivity[Zernikes](ndof={NDOF})"
+
+
+# ---------------------------------------------------------------------------
 # Tests: repr
 # ---------------------------------------------------------------------------
 
@@ -394,7 +477,6 @@ class TestRepr:
         r = repr(sens)
         assert "Sensitivity[Zernikes]" in r
         assert "ndof=4" in r
-        assert "basis='f'" in r
 
     def test_repr_spots(self):
         sens, _ = _make_spots_sensitivity()

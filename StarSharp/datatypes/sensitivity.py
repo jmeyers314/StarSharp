@@ -31,12 +31,26 @@ class Sensitivity:
         the DOF representation in which the gradient is expressed.
     """
 
-    nominal: object
     gradient: object
-    steps: State
+    nominal: object | None = None
+    steps: State | None = None
 
     def __class_getitem__(cls, item):
         return cls
+
+    def __post_init__(self):
+        if self.nominal is None:
+            # Set nominal to zeroed-out first gradient slice.
+            # Copy broadcast fields (e.g. vignetted for Spots) unchanged.
+            grad0 = self.gradient[0]
+            updates = {
+                f: np.zeros_like(getattr(grad0, f))
+                for f in grad0._sensitivity_fields
+            }
+            for f in getattr(type(grad0), "_broadcast_fields", ()):
+                updates[f] = getattr(grad0, f).copy()
+            nominal = replace(grad0, **updates)
+            object.__setattr__(self, "nominal", nominal)
 
     @property
     def ndof(self) -> int:
@@ -111,9 +125,5 @@ class Sensitivity:
         return cls(nominal=nominal, gradient=gradient, steps=steps)
 
     def __repr__(self) -> str:
-        tname = type(self.nominal).__name__
-        return (
-            f"Sensitivity[{tname}]("
-            f"ndof={self.ndof}, "
-            f"basis={self.steps.basis!r})"
-        )
+        tname = type(self.gradient).__name__
+        return f"Sensitivity[{tname}](ndof={self.ndof})"

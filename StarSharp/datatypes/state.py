@@ -183,7 +183,7 @@ def _sensitivity_to_matrix(sens) -> np.ndarray:
     """Extract a ``(n_obs, n_dof)`` design matrix from a ``Sensitivity``.
 
     Works for any observable type that defines ``_sensitivity_fields``.
-    For ``Sensitivity[Spots]``, vignetted rays (as recorded on the nominal)
+    For ``Sensitivity[Spots]``, vignetted rays (as recorded on the gradient)
     are excluded from the matrix.
     """
     from .spots import Spots
@@ -193,9 +193,9 @@ def _sensitivity_to_matrix(sens) -> np.ndarray:
     n_dof = gradient.batch_shape[0]
 
     # Build a column mask: True where we keep the observation.
-    is_spots = isinstance(sens.nominal, Spots)
+    is_spots = isinstance(sens.gradient, Spots)
     if is_spots:
-        valid = ~sens.nominal.vignetted.ravel()  # (n_field * n_ray,)
+        valid = ~sens.gradient[0].vignetted.ravel()  # (n_field * n_ray,)
     else:
         valid = None
 

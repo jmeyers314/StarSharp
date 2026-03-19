@@ -1,4 +1,5 @@
 from .datatypes import (
+    DoubleZernikes,
     FieldCoords,
     Moments,
     Moments2,
@@ -13,6 +14,7 @@ from .datatypes import (
 from .models import LinearOpticalModel, RaytracedOpticalModel
 
 __all__ = [
+    "DoubleZernikes",
     "FieldCoords",
     "Spots",
     "Zernikes",
