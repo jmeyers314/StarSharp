@@ -203,9 +203,9 @@ def _sensitivity_to_matrix(sens) -> np.ndarray:
     for f in obs_type._sensitivity_fields:
         arr = getattr(gradient, f)
         arr = arr.value if hasattr(arr, "value") else np.asarray(arr, dtype=float)
-        arr = arr.reshape(n_dof, -1)   # (n_dof, n_flat_obs)
+        arr = arr.reshape(n_dof, -1)  # (n_dof, n_flat_obs)
         if valid is not None:
-            arr = arr[:, valid]         # (n_dof, n_valid_obs)
+            arr = arr[:, valid]  # (n_dof, n_valid_obs)
         chunks.append(arr)
 
     return np.concatenate(chunks, axis=1).T  # (total_obs, n_dof)
@@ -250,6 +250,7 @@ class StateFactory:
         else:
             # Lazy import to avoid circular dependency (sensitivity.py imports State).
             from .sensitivity import Sensitivity
+
             if isinstance(A, Sensitivity):
                 A = _sensitivity_to_matrix(A)
         if use_dof is None:

@@ -1,3 +1,5 @@
+from typing import Literal
+
 import astropy.units as u
 import batoid
 import numpy as np
@@ -5,7 +7,6 @@ from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
 from numpy.typing import NDArray
-from typing import Literal
 from tqdm import tqdm
 
 from ..datatypes import FieldCoords, Sensitivity, Spots, State, Zernikes
@@ -44,6 +45,7 @@ class RaytracedOpticalModel:
         Progress-bar factory (e.g. ``tqdm.tqdm``).  When provided, a bar
         is shown during long ray-tracing loops.
     """
+
     def __init__(
         self,
         builder: LSSTBuilder,
@@ -262,7 +264,8 @@ class RaytracedOpticalModel:
             w = ~rays.vignetted
             if reference == "chief":
                 cr = batoid.RayVector.fromStop(
-                    0.0, 0.0,
+                    0.0,
+                    0.0,
                     theta_x=thx.to_value(u.rad),
                     theta_y=thy.to_value(u.rad),
                     optic=telescope,

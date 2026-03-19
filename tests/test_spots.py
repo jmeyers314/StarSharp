@@ -175,8 +175,14 @@ class TestSpotsPupilCoords:
         px = np.linspace(-4.0, 4.0, n_ray) * u.m
         py = np.linspace(-4.0, 4.0, n_ray) * u.m
         return Spots(
-            dx=dx, dy=dy, vignetted=vig, field=field,
-            frame="ccs", rtp=RTP, px=px, py=py,
+            dx=dx,
+            dy=dy,
+            vignetted=vig,
+            field=field,
+            frame="ccs",
+            rtp=RTP,
+            px=px,
+            py=py,
         )
 
     def test_default_none(self):
@@ -220,12 +226,20 @@ class TestSpotsPupilCoords:
         px = np.linspace(-4.0, 4.0, n_ray) * u.m
         py = np.linspace(-4.0, 4.0, n_ray) * u.m
         sp = Spots(
-            dx=dx, dy=dy, vignetted=vig, field=field,
-            frame="ccs", rtp=RTP, wcs=wcs, px=px, py=py,
+            dx=dx,
+            dy=dy,
+            vignetted=vig,
+            field=field,
+            frame="ccs",
+            rtp=RTP,
+            wcs=wcs,
+            px=px,
+            py=py,
         )
         converted = sp.angle
         np.testing.assert_array_equal(converted.px, sp.px)
         np.testing.assert_array_equal(converted.py, sp.py)
+
 
 class TestSpotsComputeMoments:
     def test_returns_moments_instance(self):

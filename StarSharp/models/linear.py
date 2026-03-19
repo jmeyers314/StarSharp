@@ -9,12 +9,7 @@ from astropy.coordinates import Angle
 from lsst.afw.cameraGeom import Camera
 from scipy.interpolate import RegularGridInterpolator
 
-from ..datatypes import (
-    FieldCoords,
-    Sensitivity,
-    State,
-    Zernikes,
-)
+from ..datatypes import FieldCoords, Sensitivity, State, Zernikes
 
 
 class LinearOpticalModel:

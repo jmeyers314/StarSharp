@@ -1,14 +1,15 @@
-import numpy as np
-import batoid
-from batoid_rubin import LSSTBuilder
-from astropy.coordinates import Angle
-from lsst.obs.lsst import LsstCam
-from StarSharp import RaytracedOpticalModel, StateFactory
-import astropy.units as u
 from dataclasses import replace
-from tqdm import trange
-import matplotlib.pyplot as plt
 
+import astropy.units as u
+import batoid
+import matplotlib.pyplot as plt
+import numpy as np
+from astropy.coordinates import Angle
+from batoid_rubin import LSSTBuilder
+from lsst.obs.lsst import LsstCam
+from tqdm import trange
+
+from StarSharp import RaytracedOpticalModel, StateFactory
 
 fiducial = batoid.Optic.fromYaml("Rubin_v3.14_r.yaml")
 # fiducial = batoid.Optic.fromYaml("LSST_r.yaml")
@@ -30,7 +31,7 @@ model = RaytracedOpticalModel(
 )
 
 sf = StateFactory(50)
-nominal_state = sf.from_f([0]*50)
+nominal_state = sf.from_f([0] * 50)
 steps = sf.from_f(model.steps)
 field = model.make_ccd_field(nx=1)
 

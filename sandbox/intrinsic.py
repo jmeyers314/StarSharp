@@ -8,8 +8,9 @@ from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE
 from lsst.obs.lsst import LsstCam
-from StarSharp import RaytracedOpticalModel, State, StateFactory
 from tqdm import tqdm
+
+from StarSharp import RaytracedOpticalModel, State, StateFactory
 
 fiducial = batoid.Optic.fromYaml("Rubin_v3.14_r.yaml")
 builder = LSSTBuilder(
@@ -53,7 +54,7 @@ for i, rtp in enumerate(tqdm(angles, desc="Rendering frames")):
     )
     states[rtp] = opt
 
-    zk = model.zernikes(state=opt+offset, field=field)
+    zk = model.zernikes(state=opt + offset, field=field)
 
     fig, ax = plt.subplots(figsize=(7, 7))
     for det in camera:

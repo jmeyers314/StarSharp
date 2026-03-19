@@ -1,13 +1,14 @@
 from pathlib import Path
-import numpy as np
-import batoid
-from batoid_rubin import LSSTBuilder
-from astropy.coordinates import Angle
-from lsst.obs.lsst import LsstCam
-from StarSharp import RaytracedOpticalModel, StateFactory
-import astropy.units as u
-import matplotlib.pyplot as plt
 
+import astropy.units as u
+import batoid
+import matplotlib.pyplot as plt
+import numpy as np
+from astropy.coordinates import Angle
+from batoid_rubin import LSSTBuilder
+from lsst.obs.lsst import LsstCam
+
+from StarSharp import RaytracedOpticalModel, StateFactory
 
 fiducial = batoid.Optic.fromYaml("Rubin_v3.14_r.yaml")
 builder = LSSTBuilder(
@@ -29,7 +30,7 @@ model = RaytracedOpticalModel(
 
 field = model.make_ccd_field(nx=1, detnums=np.arange(4, 189, 9))
 sf = StateFactory(50)
-nominal_state = sf.from_f([0]*50)
+nominal_state = sf.from_f([0] * 50)
 steps = sf.from_f(model.steps)
 
 sens_gq = model.zernikes_sensitivity(
@@ -50,7 +51,7 @@ dof_dir.mkdir(exist_ok=True)
 for idof in range(steps.value.size):
     fig, axs = plt.subplots(nrows=4, ncols=7, figsize=(25, 12), constrained_layout=True)
     for j in range(4, 29):
-        ax = axs.flat[j-1]
+        ax = axs.flat[j - 1]
         im = ax.scatter(
             field.x.to_value(u.mm),
             field.y.to_value(u.mm),
@@ -71,7 +72,7 @@ for idof in range(steps.value.size):
 for idof in range(steps.value.size):
     fig, axs = plt.subplots(nrows=4, ncols=7, figsize=(25, 12), constrained_layout=True)
     for j in range(4, 29):
-        ax = axs.flat[j-1]
+        ax = axs.flat[j - 1]
         im = ax.scatter(
             field.x.to_value(u.mm),
             field.y.to_value(u.mm),
@@ -93,8 +94,11 @@ for idof in range(steps.value.size):
 for idof in range(steps.value.size):
     fig, axs = plt.subplots(nrows=4, ncols=7, figsize=(25, 12), constrained_layout=True)
     for j in range(4, 29):
-        ax = axs.flat[j-1]
-        dz = sens_gq.gradient.coefs[idof, :, j].value - sens_ta.gradient.coefs[idof, :, j].value
+        ax = axs.flat[j - 1]
+        dz = (
+            sens_gq.gradient.coefs[idof, :, j].value
+            - sens_ta.gradient.coefs[idof, :, j].value
+        )
         im = ax.scatter(
             field.x.to_value(u.mm),
             field.y.to_value(u.mm),

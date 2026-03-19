@@ -8,8 +8,9 @@ from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE
 from lsst.obs.lsst import LsstCam
-from StarSharp import RaytracedOpticalModel, StateFactory
 from tqdm import tqdm
+
+from StarSharp import RaytracedOpticalModel, StateFactory
 
 fiducial = batoid.Optic.fromYaml("Rubin_v3.14_r.yaml")
 builder = LSSTBuilder(
@@ -40,9 +41,7 @@ field = model.make_ccd_field(
 
 # Just calculate for specific dofs
 sf22 = StateFactory(50, use_dof="0-9,10-16,30-34")
-steps = sf22.from_x(
-    model.steps[sf22.use_dof]
-)
+steps = sf22.from_x(model.steps[sf22.use_dof])
 
 
 sens = model.zernikes_sensitivity(
@@ -59,8 +58,9 @@ for i in range(len(sens)):
         field.x.to_value(u.mm),
         field.y.to_value(u.mm),
         c=sens[i].coefs[:, 4].to_value(u.micron),
-        vmin=vmin, vmax=vmax,
-        cmap="bwr"
+        vmin=vmin,
+        vmax=vmax,
+        cmap="bwr",
     )
     ax_i.set_title(f"DOF {sf22.use_dof[i]}")
 plt.show()

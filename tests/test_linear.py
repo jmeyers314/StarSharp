@@ -37,9 +37,7 @@ PUPIL_INNER = 4.18 * 0.612 * u.m
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_camera(
-    xlo=-50.0, xhi=50.0, ylo=-50.0, yhi=50.0, det_id=1
-):
+def _make_mock_camera(xlo=-50.0, xhi=50.0, ylo=-50.0, yhi=50.0, det_id=1):
     """Return a mock Camera with one rectangular detector in CCS mm.
 
     getCorners(FOCAL_PLANE) returns DVCS corners, which are the
@@ -69,7 +67,10 @@ def _make_wcs(rtp: Angle | None = None) -> galsim.BaseWCS:
     scale = np.deg2rad(20 / 3600)
     rot = np.array([[c, -s], [s, c]]) * scale
     return galsim.AffineTransform(
-        rot[0, 0], rot[0, 1], rot[1, 0], rot[1, 1],
+        rot[0, 0],
+        rot[0, 1],
+        rot[1, 0],
+        rot[1, 1],
         galsim.PositionD(0.0, 0.0),
     )
 
@@ -143,15 +144,17 @@ def _make_dz_sensitivity(ndof=NDOF, jmax=JMAX, kmax=KMAX, rtp=None):
     perturbed = []
     for i in range(ndof):
         delta = rng.standard_normal((kmax + 1, jmax + 1))
-        perturbed.append(DoubleZernikes(
-            coefs=(nominal_coefs.value + delta) * u.um,
-            field_outer=FIELD_OUTER,
-            field_inner=FIELD_INNER,
-            pupil_outer=PUPIL_OUTER,
-            pupil_inner=PUPIL_INNER,
-            frame="ocs",
-            rtp=rtp,
-        ))
+        perturbed.append(
+            DoubleZernikes(
+                coefs=(nominal_coefs.value + delta) * u.um,
+                field_outer=FIELD_OUTER,
+                field_inner=FIELD_INNER,
+                pupil_outer=PUPIL_OUTER,
+                pupil_inner=PUPIL_INNER,
+                frame="ocs",
+                rtp=rtp,
+            )
+        )
 
     return Sensitivity.from_finite_differences(nominal, perturbed, steps)
 
@@ -180,9 +183,7 @@ class TestInterpolation:
         field2 = _make_grid_field(camera=camera2, wcs=wcs)
         result = model._interpolate_zernikes(field2)
 
-        np.testing.assert_allclose(
-            result, nominal.coefs.to_value(u.um), atol=1e-12
-        )
+        np.testing.assert_allclose(result, nominal.coefs.to_value(u.um), atol=1e-12)
 
     def test_interpolate_between_grid(self):
         """Querying between grid points gives linearly interpolated values."""
@@ -199,7 +200,12 @@ class TestInterpolation:
         mid_x = np.array([0.0, 10.0]) * u.mm
         mid_y = np.array([0.0, 10.0]) * u.mm
         query = FieldCoords(
-            x=mid_x, y=mid_y, frame="ccs", rtp=RTP, wcs=wcs, camera=camera2,
+            x=mid_x,
+            y=mid_y,
+            frame="ccs",
+            rtp=RTP,
+            wcs=wcs,
+            camera=camera2,
         )
         result = model._interpolate_zernikes(query)
 
@@ -208,9 +214,7 @@ class TestInterpolation:
         expected = np.zeros((2, JMAX + 1))
         for j in range(JMAX + 1):
             expected[:, j] = (
-                0.1 * mid_x.to_value(u.mm)
-                + 0.05 * mid_y.to_value(u.mm)
-                + j
+                0.1 * mid_x.to_value(u.mm) + 0.05 * mid_y.to_value(u.mm) + j
             )
         np.testing.assert_allclose(result, expected, atol=1e-12)
 
@@ -277,15 +281,11 @@ class TestZernikes:
         # Manually compute the expected delta from the sensitivity
         field_ocs = field2.angle.ocs
         grad_zk = sens.gradient.single(field_ocs)
-        delta = np.einsum(
-            "i...,i->...", grad_zk.coefs.to_value(u.um), weights
-        )
+        delta = np.einsum("i...,i->...", grad_zk.coefs.to_value(u.um), weights)
 
         # With rtp=0, nominal_ocs == nominal_ccs
         expected = nominal.coefs.to_value(u.um) + delta
-        np.testing.assert_allclose(
-            zk.coefs.to_value(u.um), expected, atol=1e-10
-        )
+        np.testing.assert_allclose(zk.coefs.to_value(u.um), expected, atol=1e-10)
 
     def test_prepare_field_attaches_metadata(self):
         """_prepare_field fills in rtp, camera, and wcs from self."""
@@ -297,7 +297,9 @@ class TestZernikes:
 
         model = LinearOpticalModel(nominal, sens, RTP, camera)
 
-        bare = FieldCoords(x=np.array([0.0]) * u.mm, y=np.array([0.0]) * u.mm, frame="ccs")
+        bare = FieldCoords(
+            x=np.array([0.0]) * u.mm, y=np.array([0.0]) * u.mm, frame="ccs"
+        )
         prepared = model._prepare_field(bare)
         assert prepared.rtp is not None
         assert prepared.camera is not None
@@ -376,9 +378,7 @@ class TestOptimize:
         field5 = _make_grid_field(nx=5, ny=5, camera=camera5, wcs=wcs)
         recovered = model2.optimize(guess, field5, jmin=0)
 
-        np.testing.assert_allclose(
-            recovered.value, -true_weights, atol=1e-6
-        )
+        np.testing.assert_allclose(recovered.value, -true_weights, atol=1e-6)
 
     def test_optimize_with_offset(self):
         """optimize with offset adds the offset to the result."""
