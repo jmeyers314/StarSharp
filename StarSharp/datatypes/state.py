@@ -179,6 +179,38 @@ class State:
         )
 
 
+def _sensitivity_to_matrix(sens) -> np.ndarray:
+    """Extract a ``(n_obs, n_dof)`` design matrix from a ``Sensitivity``.
+
+    Works for any observable type that defines ``_sensitivity_fields``.
+    For ``Sensitivity[Spots]``, vignetted rays (as recorded on the nominal)
+    are excluded from the matrix.
+    """
+    from .spots import Spots
+
+    gradient = sens.gradient
+    obs_type = type(gradient)
+    n_dof = gradient.batch_shape[0]
+
+    # Build a column mask: True where we keep the observation.
+    is_spots = isinstance(sens.nominal, Spots)
+    if is_spots:
+        valid = ~sens.nominal.vignetted.ravel()  # (n_field * n_ray,)
+    else:
+        valid = None
+
+    chunks = []
+    for f in obs_type._sensitivity_fields:
+        arr = getattr(gradient, f)
+        arr = arr.value if hasattr(arr, "value") else np.asarray(arr, dtype=float)
+        arr = arr.reshape(n_dof, -1)   # (n_dof, n_flat_obs)
+        if valid is not None:
+            arr = arr[:, valid]         # (n_dof, n_valid_obs)
+        chunks.append(arr)
+
+    return np.concatenate(chunks, axis=1).T  # (total_obs, n_dof)
+
+
 class StateFactory:
     """Factory for creating `State` objects with shared SVD context.
 
@@ -189,9 +221,13 @@ class StateFactory:
 
     Parameters
     ----------
-    A : array-like
-        Sensitivity matrix.  The last axis has length ``n_dof``.
-        All other axes are flattened before SVD.
+    A : array-like, int, or Sensitivity
+        Design matrix.  If an array, should have shape ``(nobs, n_dof)``.
+        If an *int* ``n``, an ``n × n`` identity is used.
+        If a :class:`~StarSharp.Sensitivity`, the design matrix is extracted
+        from the sensitivity fields of the gradient (via ``_sensitivity_fields``),
+        flattened and concatenated to ``(nobs, n_dof)``.  For
+        ``Sensitivity[Spots]``, vignetted rays are automatically excluded.
     norm : array-like of float
         Normalization factors for each DOF.  The SVD is computed on
         ``A @ np.diag(norm)``.
@@ -204,13 +240,18 @@ class StateFactory:
 
     def __init__(
         self,
-        A: NDArray[np.floating] | int,
+        A,
         norm: NDArray[np.floating] | None = None,
         use_dof: NDArray[np.integer] | str | None = None,
         nkeep: int | None = None,
     ):
         if isinstance(A, int):
             A = np.eye(A)
+        else:
+            # Lazy import to avoid circular dependency (sensitivity.py imports State).
+            from .sensitivity import Sensitivity
+            if isinstance(A, Sensitivity):
+                A = _sensitivity_to_matrix(A)
         if use_dof is None:
             use_dof = np.arange(A.shape[-1])
         if isinstance(use_dof, str):

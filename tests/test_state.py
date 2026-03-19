@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import astropy.units as u
 import numpy as np
 import pytest
 
-from StarSharp.datatypes import State, StateFactory
+from StarSharp.datatypes import Sensitivity, State, StateFactory
+
+from .utils import _make_field
 
 
 def _make_Vh(n_active, nkeep=None, rng=None):
@@ -288,3 +291,80 @@ class TestStateFactory:
         # If norm is all ones, should match no-norm
         sf_ones = StateFactory(A=A, use_dof=np.arange(5), norm=np.ones(5))
         np.testing.assert_allclose(sf_ones.S, sf_no_norm.S)
+
+    def test_from_sensitivity_zernikes(self):
+        """StateFactory accepts a Sensitivity[Zernikes] and extracts the design matrix."""
+        from StarSharp.datatypes import Zernikes
+
+        rng = np.random.default_rng(77)
+        n_dof = 5
+        n_field = 3
+        jmax = 10
+        # Gradient Zernikes: shape (n_dof, n_field, jmax+1)
+        grad_coefs = rng.standard_normal((n_dof, n_field, jmax + 1)) * u.um
+        field = _make_field(n_field)
+        gradient = Zernikes(coefs=grad_coefs, field=field)
+        nominal = Zernikes(
+            coefs=rng.standard_normal((n_field, jmax + 1)) * u.um,
+            field=field,
+        )
+        steps = State(value=np.ones(n_dof), basis="x", use_dof=np.arange(n_dof), n_dof=n_dof)
+        sens = Sensitivity(nominal=nominal, gradient=gradient, steps=steps)
+
+        use_dof = np.arange(n_dof)
+        sf = StateFactory(sens, use_dof=use_dof, nkeep=3)
+
+        # Design matrix should be (n_field * (jmax+1), n_dof)
+        nobs = n_field * (jmax + 1)
+        assert sf.A.shape == (nobs, n_dof)
+        assert sf.Vh.shape == (3, n_dof)
+
+        # Result should match building from the raw array directly
+        A_raw = grad_coefs.value.reshape(n_dof, -1).T
+        sf_raw = StateFactory(A=A_raw, use_dof=use_dof, nkeep=3)
+        np.testing.assert_allclose(sf.S, sf_raw.S)
+
+    def test_from_sensitivity_spots(self):
+        """StateFactory[Sensitivity[Spots]] concatenates dx/dy and excludes vignetted rays."""
+        from StarSharp.datatypes import Spots
+
+        rng = np.random.default_rng(88)
+        n_dof = 4
+        n_field = 2
+        n_ray = 10
+        field = _make_field(n_field)
+
+        # Nominal spots: 2 of the 10 rays are vignetted
+        vig = np.zeros((n_field, n_ray), dtype=bool)
+        vig[0, 0] = True
+        vig[1, 3] = True
+        nom = Spots(
+            dx=rng.standard_normal((n_field, n_ray)) * u.um,
+            dy=rng.standard_normal((n_field, n_ray)) * u.um,
+            vignetted=vig,
+            field=field,
+        )
+
+        # Gradient spots: (n_dof, n_field, n_ray)
+        grad = Spots(
+            dx=rng.standard_normal((n_dof, n_field, n_ray)) * u.um,
+            dy=rng.standard_normal((n_dof, n_field, n_ray)) * u.um,
+            vignetted=np.broadcast_to(vig, (n_dof, n_field, n_ray)).copy(),
+            field=field,
+        )
+        steps = State(value=np.ones(n_dof), basis="x", use_dof=np.arange(n_dof), n_dof=n_dof)
+        sens = Sensitivity(nominal=nom, gradient=grad, steps=steps)
+
+        sf = StateFactory(sens, use_dof=np.arange(n_dof))
+
+        # 2 rays vignetted out of n_field * n_ray = 20; two fields dx+dy → 2*(20-2) = 36 obs
+        n_valid = n_field * n_ray - 2
+        assert sf.A.shape == (2 * n_valid, n_dof)
+
+        # Verify values match manual construction
+        valid = ~vig.ravel()
+        dx_rows = grad.dx.value.reshape(n_dof, -1)[:, valid]
+        dy_rows = grad.dy.value.reshape(n_dof, -1)[:, valid]
+        A_raw = np.concatenate([dx_rows, dy_rows], axis=1).T
+        sf_raw = StateFactory(A=A_raw, use_dof=np.arange(n_dof))
+        np.testing.assert_allclose(sf.A, sf_raw.A)
