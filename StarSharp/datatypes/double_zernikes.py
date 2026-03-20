@@ -112,14 +112,18 @@ class DoubleZernikes:
             raise ValueError("Field rtp must match DoubleZernikes rtp")
         field = getattr(field, self.frame)
 
-        # Field Zernike basis: (kmax+1, nfield) -> transpose to (nfield, kmax+1)
-        B = galsim.zernike.zernikeBasis(
-            self.kmax,
-            field.x.value,
-            field.y.value,
-            R_outer=self.field_outer.to_value(field.x.unit),
-            R_inner=self.field_inner.to_value(field.x.unit),
-        ).T
+        # Field Zernike basis: (kmax+1, *field_shape) -> move axis to (*field_shape, kmax+1)
+        B = np.moveaxis(
+            galsim.zernike.zernikeBasis(
+                self.kmax,
+                field.x.value,
+                field.y.value,
+                R_outer=self.field_outer.to_value(field.x.unit),
+                R_inner=self.field_inner.to_value(field.x.unit),
+            ),
+            0,
+            -1,
+        )
         coefs = B @ self.coefs
 
         return Zernikes(

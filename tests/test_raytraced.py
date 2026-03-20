@@ -905,3 +905,231 @@ class TestZernikesExtraZk:
         assert len(model.builder.extra_zk_calls) == total
         for zk_arg, _ in model.builder.extra_zk_calls:
             np.testing.assert_allclose(zk_arg, [0.0, 5e-8, 0.0])
+
+
+# ---------------------------------------------------------------------------
+# DoubleZernikes as zk parameter tests
+# ---------------------------------------------------------------------------
+
+import galsim
+
+
+def _expected_dz_coefs_flat(dz, field):
+    """Compute expected per-field Zernike coefs (metres, flat) from a DoubleZernikes."""
+    x = field.x.to_value(u.deg)
+    y = field.y.to_value(u.deg)
+    B = np.moveaxis(
+        galsim.zernike.zernikeBasis(
+            dz.kmax, x, y,
+            R_outer=dz.field_outer.to_value(u.deg),
+            R_inner=dz.field_inner.to_value(u.deg),
+        ),
+        0, -1,
+    )  # (*field_shape, kmax+1)
+    coefs = B @ dz.coefs.to_value(u.m)  # (*broadcast_batch, nfield, jmax+1)
+    batch_shape = field.x.shape[:-1]
+    nfield = field.x.shape[-1]
+    target = batch_shape + (nfield, dz.jmax + 1)
+    coefs = np.broadcast_to(coefs, target)
+    total = int(np.prod(batch_shape)) * nfield
+    return coefs.reshape(total, -1)
+
+
+def _make_dz(kmax=3, jmax_dz=3, batch_shape=(), rng_seed=123):
+    """Create a DoubleZernikes with random coefs."""
+    rng = np.random.default_rng(rng_seed)
+    coefs = rng.standard_normal(batch_shape + (kmax + 1, jmax_dz + 1)) * 1e-7
+    return DoubleZernikes(
+        coefs=coefs * u.m,
+        field_outer=FIELD_OUTER,
+        field_inner=FIELD_INNER,
+        pupil_outer=PUPIL_OUTER,
+        pupil_inner=PUPIL_INNER,
+        frame="ocs",
+    )
+
+
+class TestSpotsDoubleZernikesZk:
+    """Verify DoubleZernikes zk parameter in spots()."""
+
+    @staticmethod
+    def _patch_hexapolar(monkeypatch, px, py):
+        monkeypatch.setattr(
+            raytraced_module.batoid.utils, "hexapolar",
+            lambda **kwargs: (px, py),
+        )
+
+    @staticmethod
+    def _patch_fromStop(monkeypatch):
+        def fake_fromStop(px_in, py_in, theta_x, theta_y, optic, wavelength):
+            px_arr = np.atleast_1d(np.asarray(px_in, dtype=float))
+            py_arr = np.atleast_1d(np.asarray(py_in, dtype=float))
+            if px_arr.size == 1 and py_arr.size == 1 and px_arr[0] == 0.0:
+                return SimpleNamespace(
+                    x=np.array([theta_x]),
+                    y=np.array([theta_y]),
+                    vignetted=np.array([False]),
+                )
+            return SimpleNamespace(
+                x=px_arr + theta_x,
+                y=py_arr + theta_y,
+                vignetted=np.zeros(len(px_arr), dtype=bool),
+            )
+        monkeypatch.setattr(
+            raytraced_module.batoid.RayVector, "fromStop",
+            staticmethod(fake_fromStop),
+        )
+
+    def test_dz_per_field_coefs(self, monkeypatch):
+        """DZ produces correct field-dependent Zernike coefs at each field point."""
+        model = _make_recording_model_stub()
+        nfield = 3
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px, py = np.array([-1.0, 0.0, 1.0]), np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        dz = _make_dz()
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=dz, nrad=2, reference="chief",
+        )
+
+        expected = _expected_dz_coefs_flat(dz, field)
+        assert len(model.builder.extra_zk_calls) == nfield
+        for i, (zk_arg, eps) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
+            assert eps == pytest.approx(PUPIL_INNER.to_value(u.m) / PUPIL_OUTER.to_value(u.m))
+
+    def test_dz_broadcasts_over_field_batch(self, monkeypatch):
+        """DZ without batch broadcasts correctly over field batch dims."""
+        model = _make_recording_model_stub()
+        batch_shape = (2,)
+        nfield = 3
+        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px, py = np.array([-1.0, 0.0, 1.0]), np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        dz = _make_dz()  # no DZ batch
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=dz, nrad=2, reference="chief",
+        )
+
+        expected = _expected_dz_coefs_flat(dz, field)
+        total = 2 * 3
+        assert len(model.builder.extra_zk_calls) == total
+        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
+
+    def test_dz_piston_only_uniform(self, monkeypatch):
+        """DZ with only k=1 (piston) gives uniform coefs across field points."""
+        model = _make_recording_model_stub()
+        nfield = 4
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px, py = np.array([-1.0, 0.0, 1.0]), np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        # kmax=1: Z_0=0, Z_1=1 (piston). Only k=1 row is non-zero.
+        dz_coefs = np.array([
+            [0.0, 0.0, 0.0],
+            [0.0, 3e-7, 5e-7],
+        ]) * u.m
+        dz = DoubleZernikes(
+            coefs=dz_coefs,
+            field_outer=FIELD_OUTER, field_inner=FIELD_INNER,
+            pupil_outer=PUPIL_OUTER, pupil_inner=PUPIL_INNER,
+            frame="ocs",
+        )
+
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=dz, nrad=2, reference="chief",
+        )
+
+        assert len(model.builder.extra_zk_calls) == nfield
+        for zk_arg, _ in model.builder.extra_zk_calls:
+            np.testing.assert_allclose(zk_arg, [0.0, 3e-7, 5e-7])
+
+
+class TestZernikesDoubleZernikesZk:
+    """Verify DoubleZernikes zk parameter in zernikes()."""
+
+    @staticmethod
+    def _patch_zernikeGQ(monkeypatch):
+        def fake_zernikeGQ(telescope, theta_x, theta_y, wavelength,
+                           rings, jmax, eps):
+            base = 10.0 * theta_x + 100.0 * theta_y
+            return base + np.arange(jmax + 1, dtype=float)
+        monkeypatch.setattr(raytraced_module.batoid, "zernikeGQ", fake_zernikeGQ)
+
+    def test_dz_per_field_coefs(self, monkeypatch):
+        """DZ produces correct field-dependent Zernike coefs at each field point."""
+        model = _make_recording_model_stub()
+        nfield = 3
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        dz = _make_dz()
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, zk=dz, jmax=4, rings=3,
+        )
+
+        expected = _expected_dz_coefs_flat(dz, field)
+        assert len(model.builder.extra_zk_calls) == nfield
+        for i, (zk_arg, eps) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
+            assert eps == pytest.approx(PUPIL_INNER.to_value(u.m) / PUPIL_OUTER.to_value(u.m))
+
+    def test_dz_broadcasts_over_field_batch(self, monkeypatch):
+        """DZ without batch broadcasts correctly over field batch dims."""
+        model = _make_recording_model_stub()
+        batch_shape = (2,)
+        nfield = 3
+        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        dz = _make_dz()
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, zk=dz, jmax=4, rings=3,
+        )
+
+        expected = _expected_dz_coefs_flat(dz, field)
+        total = 2 * 3
+        assert len(model.builder.extra_zk_calls) == total
+        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
+
+    def test_dz_piston_only_uniform(self, monkeypatch):
+        """DZ with only k=1 (piston) gives uniform coefs across field points."""
+        model = _make_recording_model_stub()
+        nfield = 4
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        dz_coefs = np.array([
+            [0.0, 0.0, 0.0],
+            [0.0, 3e-7, 5e-7],
+        ]) * u.m
+        dz = DoubleZernikes(
+            coefs=dz_coefs,
+            field_outer=FIELD_OUTER, field_inner=FIELD_INNER,
+            pupil_outer=PUPIL_OUTER, pupil_inner=PUPIL_INNER,
+            frame="ocs",
+        )
+
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, zk=dz, jmax=4, rings=3,
+        )
+
+        assert len(model.builder.extra_zk_calls) == nfield
+        for zk_arg, _ in model.builder.extra_zk_calls:
+            np.testing.assert_allclose(zk_arg, [0.0, 3e-7, 5e-7])

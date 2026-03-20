@@ -10,7 +10,7 @@ from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-from ..datatypes import FieldCoords, Sensitivity, Spots, State, Zernikes
+from ..datatypes import DoubleZernikes, FieldCoords, Sensitivity, Spots, State, Zernikes
 
 PUPIL_OUTER = 4.18
 PUPIL_INNER = PUPIL_OUTER * 0.612
@@ -184,7 +184,7 @@ class RaytracedOpticalModel:
         self,
         field: FieldCoords,
         state: State | None = None,
-        zk: Zernikes | None = None,
+        zk: Zernikes | DoubleZernikes | None = None,
         nrad: int = 10,
         reference: Literal["chief", "mean"] = "chief",
     ) -> Spots:
@@ -197,8 +197,10 @@ class RaytracedOpticalModel:
         field : FieldCoords
             Field coordinates at which to trace.  Any frame or space is
             accepted; coordinates are converted to OCS angles internally.
-        zk : Zernikes | None
+        zk : Zernikes | DoubleZernikes | None
             Extra Zernike phase perturbation to apply at the entrance pupil.
+            If ``DoubleZernikes``, it is first converted to ``Zernikes``
+            via ``.single(field)``.
             The coefs array is broadcast against the field shape:
             ``(1, jmax+1)`` applies the same perturbation everywhere;
             ``(nfield, jmax+1)`` gives per-field perturbations broadcast
@@ -222,6 +224,8 @@ class RaytracedOpticalModel:
             raise ValueError(
                 f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})"
             )
+        if isinstance(zk, DoubleZernikes):
+            zk = zk.single(field)
         # Pick an outer radius that is half a grid radius smaller than the outer pupil
         # And similarly for the inner radius (but larger).
         dr = (PUPIL_OUTER - PUPIL_INNER) / (nrad + 1)
@@ -350,7 +354,7 @@ class RaytracedOpticalModel:
         self,
         field: FieldCoords,
         state: State | None = None,
-        zk: Zernikes | None = None,
+        zk: Zernikes | DoubleZernikes | None = None,
         jmax: int = 28,
         rings: int = 10,
         algorithm: Literal["ta", "gq"] = "gq",
@@ -363,8 +367,10 @@ class RaytracedOpticalModel:
             AOS alignment state.
         field : FieldCoords
             Field coordinates.  Converted to OCS angles internally.
-        zk : Zernikes | None
+        zk : Zernikes | DoubleZernikes | None
             Extra Zernike phase perturbation to apply at the entrance pupil.
+            If ``DoubleZernikes``, it is first converted to ``Zernikes``
+            via ``.single(field)``.
             The coefs array is broadcast against the field shape:
             ``(1, jmax_zk+1)`` applies the same perturbation everywhere;
             ``(nfield, jmax_zk+1)`` gives per-field perturbations broadcast
@@ -390,6 +396,8 @@ class RaytracedOpticalModel:
             raise ValueError(
                 f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})"
             )
+        if isinstance(zk, DoubleZernikes):
+            zk = zk.single(field)
         builder = self.builder.with_rtp(self.rtp)
         if state is not None:
             builder = builder.with_aos_dof(state.f.value)
