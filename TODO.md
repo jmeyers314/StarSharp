@@ -3,7 +3,8 @@
 
 ## High Priority
 - [ ] Check that sensitivity in zernikeGQ is consistent with sensitivity in zernikeTA
-- [ ] Add fitting for Zernikes -> State
+- [ ] Compare StarSharp/MTAOS sensitivity
+- [ ] Compare StarSharp/MTAOS vmodes
 
 ## Medium Priority
 - [ ] Data access classes
@@ -12,6 +13,7 @@
 
 
 ## Resolved
+- [x] Add fitting for Zernikes -> State
 - [x] Add zernikeTA option in RaytracedOpticalModel.zernikes
 - [x] Verify that batoid.RayVector.fromStop() is independent of state.
     See sandbox/verify_fromStop_indep.py
