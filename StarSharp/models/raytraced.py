@@ -184,6 +184,7 @@ class RaytracedOpticalModel:
         self,
         field: FieldCoords,
         state: State | None = None,
+        zk: Zernikes | None = None,
         nrad: int = 10,
         reference: Literal["chief", "mean"] = "chief",
     ) -> Spots:
@@ -196,6 +197,13 @@ class RaytracedOpticalModel:
         field : FieldCoords
             Field coordinates at which to trace.  Any frame or space is
             accepted; coordinates are converted to OCS angles internally.
+        zk : Zernikes | None
+            Extra Zernike phase perturbation to apply at the entrance pupil.
+            The coefs array is broadcast against the field shape:
+            ``(1, jmax+1)`` applies the same perturbation everywhere;
+            ``(nfield, jmax+1)`` gives per-field perturbations broadcast
+            over batch dims; ``(*batch_shape, nfield, jmax+1)`` is fully
+            specified.
         nrad : int
             Number of radial rings in the hexapolar stop sampling grid.
         reference: Literal["chief", "mean", "ring"]
@@ -237,6 +245,15 @@ class RaytracedOpticalModel:
         y_flat = field.y.reshape(total)
         detnum_flat = field.detnum.reshape(total)
 
+        # Broadcast and flatten extra Zernike coefs to (total, jmax+1) in metres.
+        # None entries signal "no extra zk for this field point".
+        if zk is not None:
+            target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
+            zk_broad = np.broadcast_to(zk.coefs.to_value(u.m), target_shape)
+            zk_coefs_flat = zk_broad.reshape(total, -1)
+        else:
+            zk_coefs_flat = [None] * total
+
         nray = len(px)
         dx = np.full((total, nray), np.nan)
         dy = np.full((total, nray), np.nan)
@@ -247,12 +264,16 @@ class RaytracedOpticalModel:
         bar = (
             self.tqdm(desc="Raytracing", total=total) if self.tqdm is not None else None
         )
-        for ifield, (thx, thy, detnum) in enumerate(zip(x_flat, y_flat, detnum_flat)):
+        for ifield, (thx, thy, detnum, zk_coef) in enumerate(zip(x_flat, y_flat, detnum_flat, zk_coefs_flat)):
+            if zk_coef is not None:
+                this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
+            else:
+                this_builder = builder
             if bar:
                 bar.update(1)
             if detnum == -1:
                 continue
-            telescope = builder.build_det(detnum)
+            telescope = this_builder.build_det(detnum)
             rays = batoid.RayVector.fromStop(
                 np.array(px),
                 np.array(py),
@@ -329,6 +350,7 @@ class RaytracedOpticalModel:
         self,
         field: FieldCoords,
         state: State | None = None,
+        zk: Zernikes | None = None,
         jmax: int = 28,
         rings: int = 10,
         algorithm: Literal["ta", "gq"] = "gq",
@@ -341,6 +363,13 @@ class RaytracedOpticalModel:
             AOS alignment state.
         field : FieldCoords
             Field coordinates.  Converted to OCS angles internally.
+        zk : Zernikes | None
+            Extra Zernike phase perturbation to apply at the entrance pupil.
+            The coefs array is broadcast against the field shape:
+            ``(1, jmax_zk+1)`` applies the same perturbation everywhere;
+            ``(nfield, jmax_zk+1)`` gives per-field perturbations broadcast
+            over batch dims; ``(*batch_shape, nfield, jmax_zk+1)`` is fully
+            specified.
         jmax : int
             Maximum Noll index (default: 28).
         rings : int
@@ -374,17 +403,29 @@ class RaytracedOpticalModel:
         y_flat = field.y.reshape(total)
         detnum_flat = field.detnum.reshape(total)
 
+        # Broadcast and flatten extra Zernike coefs to (total, jmax_zk+1) in metres.
+        if zk is not None:
+            target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
+            zk_broad = np.broadcast_to(zk.coefs.to_value(u.m), target_shape)
+            zk_coefs_flat = zk_broad.reshape(total, -1)
+        else:
+            zk_coefs_flat = [None] * total
+
         bar = (
             self.tqdm(desc="Raytracing", total=total) if self.tqdm is not None else None
         )
-        zk = []
-        for thx, thy, detnum in zip(x_flat, y_flat, detnum_flat):
+        zk_out = []
+        for thx, thy, detnum, zk_coef in zip(x_flat, y_flat, detnum_flat, zk_coefs_flat):
+            if zk_coef is not None:
+                this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
+            else:
+                this_builder = builder
             if bar:
                 bar.update(1)
             if detnum == -1:
-                zk.append(np.full(jmax + 1, np.nan))
+                zk_out.append(np.full(jmax + 1, np.nan))
                 continue
-            telescope = builder.build_det(detnum)
+            telescope = this_builder.build_det(detnum)
             if algorithm == "gq":
                 try:
                     zk1 = batoid.zernikeGQ(
@@ -413,9 +454,9 @@ class RaytracedOpticalModel:
                     )
                 except ValueError:
                     zk1 = np.full(jmax + 1, np.nan)
-            zk.append(zk1)
+            zk_out.append(zk1)
 
-        coefs = np.array(zk, dtype=float).reshape(batch_shape + (nfield, jmax + 1))
+        coefs = np.array(zk_out, dtype=float).reshape(batch_shape + (nfield, jmax + 1))
         return Zernikes(
             coefs=coefs * self.wavelength.to(u.um),
             field=field,

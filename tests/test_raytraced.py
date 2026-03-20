@@ -286,6 +286,9 @@ class _FakeBuilder:
     def with_aos_dof(self, _f):
         return self
 
+    def with_extra_zk(self, _zk, _eps):
+        return self
+
     def build_det(self, detnum):
         return _FakeTelescope()
 
@@ -582,3 +585,323 @@ class TestSpotsBatchBroadcast:
         # batch 1, fields 0/2: still valid
         assert not np.any(np.isnan(sp.dx[1, 0].value))
         assert not np.any(np.isnan(sp.dx[1, 2].value))
+
+
+# ---------------------------------------------------------------------------
+# Extra Zernike perturbation (zk parameter) tests
+# ---------------------------------------------------------------------------
+
+
+class _RecordingBuilder:
+    """Builder stub that records with_extra_zk calls."""
+
+    def __init__(self):
+        self.extra_zk_calls = []
+
+    def with_rtp(self, _rtp):
+        return self
+
+    def with_aos_dof(self, _f):
+        return self
+
+    def with_extra_zk(self, zk, eps):
+        self.extra_zk_calls.append((zk.copy(), eps))
+        return self
+
+    def build_det(self, detnum):
+        return _FakeTelescope()
+
+
+def _make_recording_model_stub():
+    """Model stub whose builder records with_extra_zk calls."""
+    model = RaytracedOpticalModel.__new__(RaytracedOpticalModel)
+    model.builder = _RecordingBuilder()
+    model.rtp = Angle(0.0, unit=u.deg)
+    model.wavelength = 620.0 * u.nm
+    model.camera = None
+    model.tqdm = None
+    model.steps = None
+    return model
+
+
+class TestSpotsExtraZk:
+    """Verify extra Zernike perturbation broadcasting in spots()."""
+
+    @staticmethod
+    def _patch_hexapolar(monkeypatch, px, py):
+        monkeypatch.setattr(
+            raytraced_module.batoid.utils, "hexapolar",
+            lambda **kwargs: (px, py),
+        )
+
+    @staticmethod
+    def _patch_fromStop(monkeypatch):
+        def fake_fromStop(px_in, py_in, theta_x, theta_y, optic, wavelength):
+            px_arr = np.atleast_1d(np.asarray(px_in, dtype=float))
+            py_arr = np.atleast_1d(np.asarray(py_in, dtype=float))
+            if px_arr.size == 1 and py_arr.size == 1 and px_arr[0] == 0.0:
+                return SimpleNamespace(
+                    x=np.array([theta_x]),
+                    y=np.array([theta_y]),
+                    vignetted=np.array([False]),
+                )
+            return SimpleNamespace(
+                x=px_arr + theta_x,
+                y=py_arr + theta_y,
+                vignetted=np.zeros(len(px_arr), dtype=bool),
+            )
+        monkeypatch.setattr(
+            raytraced_module.batoid.RayVector, "fromStop",
+            staticmethod(fake_fromStop),
+        )
+
+    def test_zk_none_no_extra_zk_calls(self, monkeypatch):
+        """When zk=None, with_extra_zk is never called."""
+        model = _make_recording_model_stub()
+        field = _make_batched_field((), 3, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=None, nrad=2, reference="chief",
+        )
+        assert len(model.builder.extra_zk_calls) == 0
+
+    def test_uniform_zk_broadcast(self, monkeypatch):
+        """(1, jmax+1) zk broadcasts the same perturbation to all field points."""
+        model = _make_recording_model_stub()
+        nfield = 3
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        zk_coefs = np.array([[0.0, 1e-7, 2e-7]]) * u.m  # (1, 3)
+        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
+        )
+
+        assert len(model.builder.extra_zk_calls) == nfield
+        for zk_arg, eps in model.builder.extra_zk_calls:
+            np.testing.assert_allclose(zk_arg, [0.0, 1e-7, 2e-7])
+            assert eps == pytest.approx(PUPIL_INNER.to_value(u.m) / PUPIL_OUTER.to_value(u.m))
+
+    def test_per_field_zk_broadcast(self, monkeypatch):
+        """(nfield, jmax+1) zk gives different perturbation per field point."""
+        model = _make_recording_model_stub()
+        nfield = 3
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        zk_coefs = np.array([
+            [0.0, 1e-7, 0.0],
+            [0.0, 0.0, 2e-7],
+            [0.0, 3e-7, 3e-7],
+        ]) * u.m  # (3, 3)
+        dummy_field = FieldCoords(
+            x=np.zeros(nfield) * u.deg, y=np.zeros(nfield) * u.deg,
+            frame="ocs", rtp=model.rtp,
+        )
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
+        )
+
+        assert len(model.builder.extra_zk_calls) == nfield
+        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, zk_coefs[i].to_value(u.m))
+
+    def test_batched_zk_broadcast(self, monkeypatch):
+        """(*batch, nfield, jmax+1) zk fully specified for each batch × field."""
+        model = _make_recording_model_stub()
+        batch_shape = (2,)
+        nfield = 3
+        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        rng = np.random.default_rng(42)
+        zk_vals = rng.normal(size=(2, 3, 4)) * 1e-7
+        zk_coefs = zk_vals * u.m
+        dummy_field = FieldCoords(
+            x=np.zeros((2, 3)) * u.deg, y=np.zeros((2, 3)) * u.deg,
+            frame="ocs", rtp=model.rtp,
+        )
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
+        )
+
+        total = 2 * 3
+        assert len(model.builder.extra_zk_calls) == total
+        flat_vals = zk_vals.reshape(total, 4)
+        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, flat_vals[i])
+
+    def test_uniform_zk_broadcast_over_batch(self, monkeypatch):
+        """(1, jmax+1) zk broadcasts across batch dims too."""
+        model = _make_recording_model_stub()
+        batch_shape = (2,)
+        nfield = 3
+        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        zk_coefs = np.array([[0.0, 5e-8, 0.0]]) * u.m  # (1, 3)
+        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.spots(
+            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
+        )
+
+        total = 2 * 3
+        assert len(model.builder.extra_zk_calls) == total
+        for zk_arg, _ in model.builder.extra_zk_calls:
+            np.testing.assert_allclose(zk_arg, [0.0, 5e-8, 0.0])
+
+
+class TestZernikesExtraZk:
+    """Verify extra Zernike perturbation broadcasting in zernikes()."""
+
+    @staticmethod
+    def _patch_zernikeGQ(monkeypatch):
+        def fake_zernikeGQ(telescope, theta_x, theta_y, wavelength,
+                           rings, jmax, eps):
+            base = 10.0 * theta_x + 100.0 * theta_y
+            return base + np.arange(jmax + 1, dtype=float)
+        monkeypatch.setattr(raytraced_module.batoid, "zernikeGQ", fake_zernikeGQ)
+
+    def test_zk_none_no_extra_zk_calls(self, monkeypatch):
+        """When zk=None, with_extra_zk is never called."""
+        model = _make_recording_model_stub()
+        field = _make_batched_field((), 3, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, jmax=4, rings=3,
+        )
+        assert len(model.builder.extra_zk_calls) == 0
+
+    def test_uniform_zk_broadcast(self, monkeypatch):
+        """(1, jmax+1) zk broadcasts same perturbation to all field points."""
+        model = _make_recording_model_stub()
+        nfield = 3
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        zk_coefs = np.array([[0.0, 1e-7, 2e-7]]) * u.m
+        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
+        )
+
+        assert len(model.builder.extra_zk_calls) == nfield
+        for zk_arg, eps in model.builder.extra_zk_calls:
+            np.testing.assert_allclose(zk_arg, [0.0, 1e-7, 2e-7])
+
+    def test_per_field_zk_broadcast(self, monkeypatch):
+        """(nfield, jmax+1) zk gives different perturbation per field."""
+        model = _make_recording_model_stub()
+        nfield = 3
+        field = _make_batched_field((), nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        zk_coefs = np.array([
+            [0.0, 1e-7, 0.0],
+            [0.0, 0.0, 2e-7],
+            [0.0, 3e-7, 3e-7],
+        ]) * u.m
+        dummy_field = FieldCoords(
+            x=np.zeros(nfield) * u.deg, y=np.zeros(nfield) * u.deg,
+            frame="ocs", rtp=model.rtp,
+        )
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
+        )
+
+        assert len(model.builder.extra_zk_calls) == nfield
+        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, zk_coefs[i].to_value(u.m))
+
+    def test_batched_zk_broadcast(self, monkeypatch):
+        """(*batch, nfield, jmax+1) zk fully specified."""
+        model = _make_recording_model_stub()
+        batch_shape = (2,)
+        nfield = 3
+        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        rng = np.random.default_rng(42)
+        zk_vals = rng.normal(size=(2, 3, 4)) * 1e-7
+        zk_coefs = zk_vals * u.m
+        dummy_field = FieldCoords(
+            x=np.zeros((2, 3)) * u.deg, y=np.zeros((2, 3)) * u.deg,
+            frame="ocs", rtp=model.rtp,
+        )
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
+        )
+
+        total = 2 * 3
+        assert len(model.builder.extra_zk_calls) == total
+        flat_vals = zk_vals.reshape(total, 4)
+        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
+            np.testing.assert_allclose(zk_arg, flat_vals[i])
+
+    def test_uniform_zk_broadcast_over_batch(self, monkeypatch):
+        """(1, jmax+1) zk broadcasts across batch dims too."""
+        model = _make_recording_model_stub()
+        batch_shape = (2,)
+        nfield = 3
+        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        zk_coefs = np.array([[0.0, 5e-8, 0.0]]) * u.m
+        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
+        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
+
+        RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
+        )
+
+        total = 2 * 3
+        assert len(model.builder.extra_zk_calls) == total
+        for zk_arg, _ in model.builder.extra_zk_calls:
+            np.testing.assert_allclose(zk_arg, [0.0, 5e-8, 0.0])
