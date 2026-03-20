@@ -246,7 +246,7 @@ class TestZernikes:
 
         camera2 = _make_mock_camera()
         field2 = _make_grid_field(camera=camera2, wcs=wcs)
-        zk = model.zernikes(state, field2)
+        zk = model.zernikes(field=field2, state=state)
 
         # With rtp=0 the rot matrix is identity, so OCS == CCS
         np.testing.assert_allclose(
@@ -276,7 +276,7 @@ class TestZernikes:
 
         camera2 = _make_mock_camera()
         field2 = _make_grid_field(nx=3, ny=3, camera=camera2, wcs=wcs)
-        zk = model.zernikes(state, field2)
+        zk = model.zernikes(field=field2, state=state)
 
         # Manually compute the expected delta from the sensitivity
         field_ocs = field2.angle.ocs
@@ -349,7 +349,7 @@ class TestOptimize:
         # Compute perturbed Zernikes (= 0 + G @ true_weights)
         camera2 = _make_mock_camera()
         field2 = _make_grid_field(nx=5, ny=5, camera=camera2, wcs=wcs)
-        zk_perturbed = model.zernikes(true_state, field2)
+        zk_perturbed = model.zernikes(field=field2, state=true_state)
 
         # Build a new model whose "nominal" is the perturbed wavefront
         camera3 = _make_mock_camera()

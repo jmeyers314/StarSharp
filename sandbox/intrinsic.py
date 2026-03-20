@@ -54,7 +54,7 @@ for i, rtp in enumerate(tqdm(angles, desc="Rendering frames")):
     )
     states[rtp] = opt
 
-    zk = model.zernikes(state=opt + offset, field=field)
+    zk = model.zernikes(field=field, state=opt + offset)
 
     fig, ax = plt.subplots(figsize=(7, 7))
     for det in camera:

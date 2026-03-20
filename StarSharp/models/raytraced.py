@@ -181,8 +181,8 @@ class RaytracedOpticalModel:
 
     def spots(
         self,
-        state: State,
         field: FieldCoords,
+        state: State | None = None,
         nrad: int = 10,
         reference: Literal["chief", "mean"] = "chief",
     ) -> Spots:
@@ -190,7 +190,7 @@ class RaytracedOpticalModel:
 
         Parameters
         ----------
-        state : State
+        state : State | None
             AOS alignment state (DOF perturbation from the nominal).
         field : FieldCoords
             Field coordinates at which to trace.  Any frame or space is
@@ -223,7 +223,9 @@ class RaytracedOpticalModel:
             naz=int(2 * np.pi * nrad / (1 - PUPIL_INNER / PUPIL_OUTER)),
         )
 
-        builder = self.builder.with_rtp(self.rtp).with_aos_dof(state.f.value)
+        builder = self.builder.with_rtp(self.rtp)
+        if state is not None:
+            builder = builder.with_aos_dof(state.f.value)
 
         # Flatten batch dims so we iterate over every field point individually,
         # then reshape outputs back to (*batch_shape, nfield, ...).
@@ -324,8 +326,8 @@ class RaytracedOpticalModel:
 
     def zernikes(
         self,
-        state: State,
         field: FieldCoords,
+        state: State | None = None,
         jmax: int = 28,
         rings: int = 10,
         algorithm: Literal["ta", "gq"] = "gq",
@@ -334,7 +336,7 @@ class RaytracedOpticalModel:
 
         Parameters
         ----------
-        state : State
+        state : State | None
             AOS alignment state.
         field : FieldCoords
             Field coordinates.  Converted to OCS angles internally.
@@ -437,7 +439,7 @@ class RaytracedOpticalModel:
             value=value,
             basis="f",
         )
-        spots = self.spots(state, field, nrad=nrad)
+        spots = self.spots(field=field, state=state, nrad=nrad)
         vignetted = spots.vignetted
         return np.concatenate(
             [
@@ -462,7 +464,7 @@ class RaytracedOpticalModel:
             value=value,
             basis="f",
         )
-        spots = self.spots(state, field, nrad=nrad)
+        spots = self.spots(field=field, state=state, nrad=nrad)
         sizes = []
         for ispot in range(len(spots)):
             vignetted = spots.vignetted[ispot]
@@ -572,8 +574,8 @@ class RaytracedOpticalModel:
                 basis="f",
             )
         nominal = self.zernikes(
-            state=offset,
             field=field,
+            state=offset,
             jmax=jmax,
             rings=rings,
         )
@@ -591,8 +593,8 @@ class RaytracedOpticalModel:
             )
             perturbed.append(
                 self.zernikes(
-                    state=offset + dstate,
                     field=field,
+                    state=offset + dstate,
                     jmax=jmax,
                     rings=rings,
                     algorithm=algorithm,
@@ -639,8 +641,8 @@ class RaytracedOpticalModel:
                 basis="f",
             )
         nominal = self.spots(
-            state=offset,
             field=field,
+            state=offset,
             nrad=nrad,
             reference=reference,
         )
@@ -658,8 +660,8 @@ class RaytracedOpticalModel:
             )
             perturbed.append(
                 self.spots(
-                    state=offset + dstate,
                     field=field,
+                    state=offset + dstate,
                     nrad=nrad,
                     reference=reference,
                 )

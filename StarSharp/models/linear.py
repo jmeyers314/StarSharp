@@ -164,7 +164,7 @@ class LinearOpticalModel:
     # Public interface
     # ------------------------------------------------------------------
 
-    def zernikes(self, state: State, field: FieldCoords) -> Zernikes:
+    def zernikes(self, field: FieldCoords, state: State) -> Zernikes:
         """Evaluate the wavefront at arbitrary field positions.
 
         Interpolates the nominal wavefront on the per-detector grid and adds
@@ -172,10 +172,10 @@ class LinearOpticalModel:
 
         Parameters
         ----------
-        state : State
-            AOS alignment perturbation (delta from the nominal).
         field : FieldCoords
             Query field coordinates (any frame / space).
+        state : State
+            AOS alignment perturbation (delta from the nominal).
 
         Returns
         -------
