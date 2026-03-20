@@ -88,32 +88,34 @@ class ZernikeSolver:
         if mode not in ("total", "deviation"):
             raise ValueError(f"mode must be 'total' or 'deviation', got {mode!r}")
 
-        sens = self.sensitivity
-        if isinstance(sens.nominal, DoubleZernikes):
-            nominal = sens.nominal.single(observed.field)
-            gradient = sens.gradient.single(observed.field)
-            sens = replace(sens, nominal=nominal, gradient=gradient)
+        # Work in ocs
+        sensitivity = self.sensitivity.ocs
+        observed = observed.ocs
+        if isinstance(sensitivity.nominal, DoubleZernikes):
+            nominal = sensitivity.nominal.single(observed.field.ocs)
+            gradient = sensitivity.gradient.single(observed.field.ocs)
+            sensitivity = replace(sensitivity, nominal=nominal, gradient=gradient)
 
         # Work in microns
-        obs = observed.ocs.coefs.to_value(u.micron)
-        grad = sens.gradient.ocs.coefs.to_value(u.micron)
+        obs = observed.coefs.to_value(u.micron)
+        sens = sensitivity.gradient.coefs.to_value(u.micron)
         nj_obs = obs.shape[-1]
-        nj_grad = grad.shape[-1]
+        nj_sens = sens.shape[-1]
 
-        if nj_obs < nj_grad:
+        if nj_obs < nj_sens:
             if not self.allow_narrow_zk:
                 raise ValueError(
                     f"Observations have {nj_obs} Zernike terms but sensitivity has "
-                    f"{nj_grad}. Set allow_narrow_zk=True to truncate the sensitivity."
+                    f"{nj_sens}. Set allow_narrow_zk=True to truncate the sensitivity."
                 )
-            grad = grad[..., :nj_obs]
-        elif nj_obs > nj_grad:
+            sens = sens[..., :nj_obs]
+        elif nj_obs > nj_sens:
             if not self.allow_narrow_sens:
                 raise ValueError(
-                    f"Sensitivity has {nj_grad} Zernike terms but observations have "
+                    f"Sensitivity has {nj_sens} Zernike terms but observations have "
                     f"{nj_obs}. Set allow_narrow_sens=True to truncate the observations."
                 )
-            obs = obs[..., :nj_grad]
+            obs = obs[..., :nj_sens]
 
         nj = obs.shape[-1]  # final common width after narrow checks
 
@@ -125,18 +127,19 @@ class ZernikeSolver:
                 "reconciling obs and sensitivity widths."
             )
         obs  = obs[..., jmin:]
-        grad = grad[..., jmin:]
+        sens = sens[..., jmin:]
 
         if mode == "total":
-            nom = sens.nominal.ocs.coefs.to_value(u.micron)
-            obs = obs - nom[..., jmin:nj]
+            nom = sensitivity.nominal.coefs.to_value(u.micron)
+            nom = nom[..., jmin:nj]
+            obs = obs - nom
 
-        x = np.linalg.lstsq(grad.reshape(grad.shape[0], -1).T, obs.ravel(), rcond=None)
+        x = np.linalg.lstsq(sens.reshape(sens.shape[0], -1).T, obs.ravel(), rcond=None)
 
         return State(
             value=x[0],
-            basis=sens.basis,
-            use_dof=sens.use_dof,
-            n_dof=sens.n_dof,
-            Vh=sens.Vh,
+            basis=sensitivity.basis,
+            use_dof=sensitivity.use_dof,
+            n_dof=sensitivity.n_dof,
+            Vh=sensitivity.Vh,
         )
