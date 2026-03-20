@@ -12,6 +12,7 @@ from .datatypes import (
     Zernikes,
 )
 from .models import LinearOpticalModel, RaytracedOpticalModel
+from .solver import ZernikeSolver
 
 __all__ = [
     "DoubleZernikes",
@@ -25,6 +26,7 @@ __all__ = [
     "Moments3",
     "Moments4",
     "Sensitivity",
+    "ZernikeSolver",
     "LinearOpticalModel",
     "RaytracedOpticalModel",
 ]
