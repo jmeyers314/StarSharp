@@ -108,7 +108,7 @@ class DoubleZernikes:
         """Return a Zernikes for a single field point."""
         from .zernikes import Zernikes
 
-        if field.rtp != self.rtp:
+        if self.rtp is not None and field.rtp != self.rtp:
             raise ValueError("Field rtp must match DoubleZernikes rtp")
         field = getattr(field, self.frame)
 
