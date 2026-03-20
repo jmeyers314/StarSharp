@@ -11,10 +11,8 @@ from tqdm import tqdm
 
 from ..datatypes import FieldCoords, Sensitivity, Spots, State, Zernikes
 
-FIELD_OUTER = 1.75
 PUPIL_OUTER = 4.18
 PUPIL_INNER = PUPIL_OUTER * 0.612
-SIGMA_TO_FWHM = np.sqrt(np.log(256))
 
 
 class RaytracedOpticalModel:
@@ -682,7 +680,7 @@ class RaytracedOpticalModel:
         """Compute the double-Zernike sensitivity matrix via finite differences.
 
         Internally calls :meth:`zernikes_sensitivity` and then projects each
-        per-field Zernike result into the double-Zernike (field × pupil)
+        per-field Zernike result into the double-Zernike (field x pupil)
         basis via :meth:`~StarSharp.datatypes.Zernikes.double`.
 
         Parameters
@@ -719,7 +717,10 @@ class RaytracedOpticalModel:
         dz_nominal = zk_sens.nominal.double(kmax, field_outer, field_inner)
         dz_gradient = zk_sens.gradient.double(kmax, field_outer, field_inner)
         return Sensitivity(
-            nominal=dz_nominal,
             gradient=dz_gradient,
-            steps=zk_sens.steps,
+            nominal=dz_nominal,
+            basis=steps.basis,
+            use_dof=steps.use_dof,
+            n_dof=steps.n_dof,
+            Vh=steps.Vh,
         )
