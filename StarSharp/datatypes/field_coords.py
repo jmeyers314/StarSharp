@@ -85,18 +85,12 @@ class FieldCoords:
         return val
 
     @classmethod
-    def from_builder(
+    def _build_wcs(
         cls,
-        x: Quantity,
-        y: Quantity,
-        *,
         builder: LSSTBuilder,
+        rtp: Angle,
         wavelength: Quantity,
-        rtp: Angle | None = None,
-        **kwargs,
-    ) -> FieldCoords:
-        if rtp is None:
-            rtp = Angle("0 deg")
+    ) -> BaseWCS:
         rotated = builder.with_rtp(rtp).build()
         nrad = 20
         th_u, th_v = batoid.utils.hexapolar(
@@ -113,6 +107,22 @@ class FieldCoords:
         wcs = galsim.FittedSIPWCS(
             rays.x * 1000, rays.y * 1000, th_u, th_v, order=3
         )  # Use mm <-> radians
+        return wcs
+
+    @classmethod
+    def from_builder(
+        cls,
+        x: Quantity,
+        y: Quantity,
+        *,
+        builder: LSSTBuilder,
+        wavelength: Quantity,
+        rtp: Angle | None = None,
+        **kwargs,
+    ) -> FieldCoords:
+        if rtp is None:
+            rtp = Angle("0 deg")
+        wcs = cls._build_wcs(builder, rtp, wavelength)
         return cls(x, y, rtp=rtp, wcs=wcs, **kwargs)
 
     @property
