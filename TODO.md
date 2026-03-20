@@ -2,14 +2,21 @@
 
 
 ## High Priority
-- [ ] Check that sensitivity in zernikeGQ is consistent with sensitivity in zernikeTA
+- [ ] FAM donut -> spot
+  • [ ] model.zernikes() and model.spot() get zk, dzk args
 - [ ] Compare StarSharp/MTAOS sensitivity
 - [ ] Compare StarSharp/MTAOS vmodes
+- [ ] Check that sensitivity in zernikeGQ is consistent with sensitivity in zernikeTA
+- [ ] Compare on-the-fly computed intrinsic to value from butler
 
 ## Medium Priority
 - [ ] Data access classes
+- [ ] Think through requiring dz.single(field) to have dz.rtp == field.rtp...
+- [ ] Run more nights
+- [ ] Create tutorial notebooks
 
 ## Low Priority
+- [ ] Hook into danish
 
 
 ## Resolved
