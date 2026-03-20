@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Literal
 
 import astropy.units as u
@@ -651,12 +652,9 @@ class RaytracedOpticalModel:
         for i, step in enumerate(steps.value):
             dval = np.zeros_like(steps.value)
             dval[i] = step
-            dstate = State(
-                value=dval,
-                basis=steps.basis,
-                use_dof=steps.use_dof,
-                n_dof=steps.n_dof,
-                Vh=steps.Vh,
+            dstate = replace(
+                steps,
+                value=dval
             )
             perturbed.append(
                 self.spots(
