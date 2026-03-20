@@ -257,3 +257,328 @@ class TestDoubleZernikesSensitivity:
         _call_method(mock_model, field, steps)
         call_kwargs = mock_model.zernikes_sensitivity.call_args.kwargs
         assert call_kwargs["offset"] is None
+
+
+# ---------------------------------------------------------------------------
+# Batch-broadcast tests for spots() and zernikes()
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+from astropy.coordinates import Angle
+
+import StarSharp.models.raytraced as raytraced_module
+
+
+class _FakeTelescope:
+    """Trivial telescope stub whose trace() is the identity."""
+
+    def trace(self, rays):
+        return rays
+
+
+class _FakeBuilder:
+    """Chainable builder stub that always returns _FakeTelescope."""
+
+    def with_rtp(self, _rtp):
+        return self
+
+    def with_aos_dof(self, _f):
+        return self
+
+    def build_det(self, detnum):
+        return _FakeTelescope()
+
+
+def _make_model_stub():
+    """Create a RaytracedOpticalModel without calling __init__."""
+    model = RaytracedOpticalModel.__new__(RaytracedOpticalModel)
+    model.builder = _FakeBuilder()
+    model.rtp = Angle(0.0, unit=u.deg)
+    model.wavelength = 620.0 * u.nm
+    model.camera = None
+    model.tqdm = None
+    model.steps = None
+    return model
+
+
+def _make_batched_field(batch_shape, nfield, rtp=None):
+    """FieldCoords with shape (*batch_shape, nfield) in OCS degrees."""
+    if rtp is None:
+        rtp = Angle(0.0, unit=u.deg)
+    shape = batch_shape + (nfield,)
+    n = int(np.prod(shape))
+    x = (np.arange(n, dtype=float) * 0.01).reshape(shape) * u.deg
+    y = (0.5 + np.arange(n, dtype=float) * 0.02).reshape(shape) * u.deg
+    return FieldCoords(x=x, y=y, frame="ocs", rtp=rtp)
+
+
+def _patch_detnum_zero(monkeypatch):
+    """Make FieldCoords.detnum always return 0 (valid detector)."""
+    monkeypatch.setattr(
+        FieldCoords,
+        "detnum",
+        property(lambda self: np.zeros(self.x.shape, dtype=int)),
+    )
+
+
+class TestZernikesBatchBroadcast:
+    """Verify zernikes() output shapes and values with non-trivial batch dims."""
+
+    @staticmethod
+    def _patch_zernikeGQ(monkeypatch):
+        """Replace batoid.zernikeGQ with a deterministic function."""
+
+        def fake_zernikeGQ(telescope, theta_x, theta_y, wavelength,
+                           rings, jmax, eps):
+            base = 10.0 * theta_x + 100.0 * theta_y
+            return base + np.arange(jmax + 1, dtype=float)
+
+        monkeypatch.setattr(raytraced_module.batoid, "zernikeGQ", fake_zernikeGQ)
+
+    def test_1d_batch(self, monkeypatch):
+        """batch_shape = (2,), nfield = 3  ->  coefs.shape == (2, 3, jmax+1)."""
+        model = _make_model_stub()
+        field = _make_batched_field((2,), 3, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        jmax = 4
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        zk = RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, jmax=jmax, rings=3,
+        )
+
+        assert zk.batch_shape == (2,)
+        assert zk.nfield == 3
+        assert zk.coefs.shape == (2, 3, jmax + 1)
+
+    def test_2d_batch(self, monkeypatch):
+        """batch_shape = (2, 4), nfield = 3."""
+        model = _make_model_stub()
+        field = _make_batched_field((2, 4), 3, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        jmax = 4
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        zk = RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, jmax=jmax, rings=3,
+        )
+
+        assert zk.batch_shape == (2, 4)
+        assert zk.nfield == 3
+        assert zk.coefs.shape == (2, 4, 3, jmax + 1)
+
+    def test_values_match_flat(self, monkeypatch):
+        """Batched results match looping over each batch element individually."""
+        model = _make_model_stub()
+        batch_shape = (2,)
+        nfield = 3
+        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        jmax = 4
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        zk_batched = RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, jmax=jmax, rings=3,
+        )
+
+        for ib in range(batch_shape[0]):
+            flat_field = FieldCoords(
+                x=field.x[ib], y=field.y[ib],
+                frame="ocs", rtp=model.rtp,
+            )
+            zk_flat = RaytracedOpticalModel.zernikes(
+                model, field=flat_field, state=state, jmax=jmax, rings=3,
+            )
+            np.testing.assert_allclose(
+                zk_batched.coefs[ib].to_value(u.um),
+                zk_flat.coefs.to_value(u.um),
+                atol=1e-12,
+            )
+
+    def test_state_none_accepted(self, monkeypatch):
+        """zernikes() should not crash when state is None."""
+        model = _make_model_stub()
+        field = _make_batched_field((2,), 3, rtp=model.rtp)
+        jmax = 4
+        _patch_detnum_zero(monkeypatch)
+        self._patch_zernikeGQ(monkeypatch)
+
+        zk = RaytracedOpticalModel.zernikes(
+            model, field=field, state=None, jmax=jmax, rings=3,
+        )
+        assert zk.coefs.shape == (2, 3, jmax + 1)
+
+    def test_detnum_minus1_gives_nan(self, monkeypatch):
+        """Points with detnum == -1 should produce NaN coefficients."""
+        model = _make_model_stub()
+        field = _make_batched_field((2,), 3, rtp=model.rtp)
+        state = State(value=np.zeros(50), basis="f")
+        jmax = 4
+        self._patch_zernikeGQ(monkeypatch)
+
+        def detnum_with_hole(self_fc):
+            out = np.zeros(self_fc.x.shape, dtype=int)
+            out[1, 1] = -1
+            return out
+
+        monkeypatch.setattr(
+            FieldCoords, "detnum",
+            property(detnum_with_hole),
+        )
+
+        zk = RaytracedOpticalModel.zernikes(
+            model, field=field, state=state, jmax=jmax, rings=3,
+        )
+
+        assert not np.any(np.isnan(zk.coefs[0].value))   # batch 0 all valid
+        assert np.all(np.isnan(zk.coefs[1, 1].value))     # batch 1, field 1 NaN
+        assert not np.any(np.isnan(zk.coefs[1, 0].value))
+        assert not np.any(np.isnan(zk.coefs[1, 2].value))
+
+
+class TestSpotsBatchBroadcast:
+    """Verify spots() output shapes and values with non-trivial batch dims."""
+
+    @staticmethod
+    def _patch_hexapolar(monkeypatch, px, py):
+        monkeypatch.setattr(
+            raytraced_module.batoid.utils, "hexapolar",
+            lambda **kwargs: (px, py),
+        )
+
+    @staticmethod
+    def _patch_fromStop(monkeypatch):
+        """Replace RayVector.fromStop with a trivial deterministic function."""
+
+        def fake_fromStop(px_in, py_in, theta_x, theta_y, optic, wavelength):
+            px_arr = np.atleast_1d(np.asarray(px_in, dtype=float))
+            py_arr = np.atleast_1d(np.asarray(py_in, dtype=float))
+            # Chief ray (single point at origin)
+            if px_arr.size == 1 and py_arr.size == 1 and px_arr[0] == 0.0:
+                return SimpleNamespace(
+                    x=np.array([theta_x]),
+                    y=np.array([theta_y]),
+                    vignetted=np.array([False]),
+                )
+            # Grid rays: place them at pupil coord + field angle
+            return SimpleNamespace(
+                x=px_arr + theta_x,
+                y=py_arr + theta_y,
+                vignetted=np.zeros(len(px_arr), dtype=bool),
+            )
+
+        monkeypatch.setattr(
+            raytraced_module.batoid.RayVector, "fromStop",
+            staticmethod(fake_fromStop),
+        )
+
+    def test_1d_batch_shapes(self, monkeypatch):
+        model = _make_model_stub()
+        field = _make_batched_field((2,), 3, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        sp = RaytracedOpticalModel.spots(
+            model, field=field, state=None, nrad=2, reference="chief",
+        )
+
+        assert sp.batch_shape == (2,)
+        assert sp.nfield == 3
+        assert sp.nray == 3
+        assert sp.dx.shape == (2, 3, 3)
+        assert sp.dy.shape == (2, 3, 3)
+        assert sp.vignetted.shape == (2, 3, 3)
+        assert sp.field.x.shape == (2, 3)
+
+    def test_2d_batch_shapes(self, monkeypatch):
+        model = _make_model_stub()
+        field = _make_batched_field((2, 4), 3, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        sp = RaytracedOpticalModel.spots(
+            model, field=field, state=None, nrad=2, reference="chief",
+        )
+
+        assert sp.batch_shape == (2, 4)
+        assert sp.nfield == 3
+        assert sp.dx.shape == (2, 4, 3, 3)
+        assert sp.field.x.shape == (2, 4, 3)
+
+    def test_values_match_flat(self, monkeypatch):
+        """Batched results match looping over each batch element individually."""
+        model = _make_model_stub()
+        field = _make_batched_field((2,), 3, rtp=model.rtp)
+        _patch_detnum_zero(monkeypatch)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        sp_batched = RaytracedOpticalModel.spots(
+            model, field=field, state=None, nrad=2, reference="chief",
+        )
+
+        for ib in range(2):
+            flat_field = FieldCoords(
+                x=field.x[ib], y=field.y[ib],
+                frame="ocs", rtp=model.rtp,
+            )
+            sp_flat = RaytracedOpticalModel.spots(
+                model, field=flat_field, state=None, nrad=2, reference="chief",
+            )
+            np.testing.assert_allclose(
+                sp_batched.dx[ib].to_value(u.micron),
+                sp_flat.dx.to_value(u.micron),
+                atol=1e-12,
+            )
+            np.testing.assert_allclose(
+                sp_batched.dy[ib].to_value(u.micron),
+                sp_flat.dy.to_value(u.micron),
+                atol=1e-12,
+            )
+            np.testing.assert_array_equal(
+                sp_batched.vignetted[ib], sp_flat.vignetted,
+            )
+
+    def test_detnum_minus1_gives_nan_and_vignetted(self, monkeypatch):
+        """Off-detector points should have NaN dx/dy and vignetted=True."""
+        model = _make_model_stub()
+        field = _make_batched_field((2,), 3, rtp=model.rtp)
+        px = np.array([-1.0, 0.0, 1.0])
+        py = np.array([0.0, 0.5, -0.5])
+        self._patch_hexapolar(monkeypatch, px, py)
+        self._patch_fromStop(monkeypatch)
+
+        def detnum_with_hole(self_fc):
+            out = np.zeros(self_fc.x.shape, dtype=int)
+            out[1, 1] = -1
+            return out
+
+        monkeypatch.setattr(
+            FieldCoords, "detnum",
+            property(detnum_with_hole),
+        )
+
+        sp = RaytracedOpticalModel.spots(
+            model, field=field, state=None, nrad=2, reference="chief",
+        )
+
+        # batch 0: all valid -> no NaN
+        assert not np.any(np.isnan(sp.dx[0].value))
+        # batch 1, field 1: off-detector -> NaN + vignetted
+        assert np.all(np.isnan(sp.dx[1, 1].value))
+        assert np.all(sp.vignetted[1, 1])
+        # batch 1, fields 0/2: still valid
+        assert not np.any(np.isnan(sp.dx[1, 0].value))
+        assert not np.any(np.isnan(sp.dx[1, 2].value))

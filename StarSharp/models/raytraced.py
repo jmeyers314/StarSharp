@@ -361,7 +361,9 @@ class RaytracedOpticalModel:
             raise ValueError(
                 f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})"
             )
-        builder = self.builder.with_rtp(self.rtp).with_aos_dof(state.f.value)
+        builder = self.builder.with_rtp(self.rtp)
+        if state is not None:
+            builder = builder.with_aos_dof(state.f.value)
 
         # Flatten batch dims so we iterate over every field point individually,
         # then reshape outputs back to (*batch_shape, nfield, jmax+1).
