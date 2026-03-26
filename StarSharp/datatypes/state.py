@@ -22,9 +22,9 @@ class State:
     -----------
     ``"f"`` — full DOF vector (length ``n_dof``).
         Inactive DOFs (not in ``use_dof``) are zero.
-    ``"x"`` — active-DOF vector (length ``len(use_dof)``).
+    ``"x"`` — active-DOF vector (length ``n_active``).
         The entries of the full vector selected by ``use_dof``.
-    ``"v"`` — SVD-truncated orthogonal-basis vector (length ``nkeep``).
+    ``"v"`` — SVD-truncated orthogonal-basis vector (length ``n_keep``).
         Only available when ``Vh`` is set.
         The roundtrip ``x → v → x`` is lossy when
         ``Vh`` is not square, though ``v → x → v`` is lossless.
@@ -44,7 +44,7 @@ class State:
         ``basis="f"``.  Required when constructing in ``"x"`` or
         ``"v"`` basis and converting to ``"f"``.
     Vh : NDArray[np.floating] or None
-        Right singular vectors, shape ``(nkeep, len(use_dof))``.
+        Right singular vectors, shape ``(n_keep, n_active)``.
         Required for any conversion involving the ``"v"`` basis.
     """
 
@@ -77,11 +77,16 @@ class State:
         return val
 
     @property
-    def nkeep(self) -> int | None:
-        """Number of SVD modes retained.  Only relevant when Vh is set."""
-        if self.Vh is not None:
-            return self.Vh.shape[0]
-        return None
+    def n_active(self) -> int:
+        """Number of active DOFs."""
+        use_dof = self._require("use_dof")
+        return len(use_dof)
+
+    @property
+    def n_keep(self) -> int:
+        """Number of SVD modes retained."""
+        Vh = self._require("Vh")
+        return Vh.shape[0]
 
     @property
     def x(self) -> State:
@@ -212,7 +217,7 @@ class StateFactory:
         ``A @ np.diag(norm)``.
     use_dof : array-like of int
         Indices of the active DOFs.
-    nkeep : int or None
+    n_keep : int or None
         Number of SVD modes to retain.  Defaults to
         ``len(use_dof)`` (no truncation).
     """
@@ -222,7 +227,7 @@ class StateFactory:
         A,
         norm: NDArray[np.floating] | None = None,
         use_dof: NDArray[np.integer] | str | None = None,
-        nkeep: int | None = None,
+        n_keep: int | None = None,
     ):
         if isinstance(A, int):
             A = np.eye(A)
@@ -255,8 +260,8 @@ class StateFactory:
         self.U = U
         self.S = S
         self.full_Vh = Vh
-        self.nkeep = nkeep if nkeep is not None else len(S)
-        self.Vh = Vh[: self.nkeep] @ np.diag(norm[use_dof])
+        self.n_keep = n_keep if n_keep is not None else len(S)
+        self.Vh = Vh[: self.n_keep] @ np.diag(norm[use_dof])
         self.Av = self.A[..., self.use_dof] @ self.Vh.T
 
     def from_x(self, value) -> State:

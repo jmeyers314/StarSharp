@@ -11,15 +11,15 @@ from StarSharp.datatypes import Sensitivity, State, StateFactory
 from .utils import _make_field
 
 
-def _make_Vh(n_active, nkeep=None, rng=None):
-    """Build an orthogonal Vh matrix of shape (nkeep, n_active)."""
+def _make_Vh(n_active, n_keep=None, rng=None):
+    """Build an orthogonal Vh matrix of shape (n_keep, n_active)."""
     if rng is None:
         rng = np.random.default_rng(99)
     A = rng.standard_normal((n_active * 3, n_active))
     _, _, Vh = np.linalg.svd(A, full_matrices=False)
-    if nkeep is None:
-        nkeep = n_active
-    return Vh[:nkeep]
+    if n_keep is None:
+        n_keep = n_active
+    return Vh[:n_keep]
 
 
 class TestStateConstruction:
@@ -40,7 +40,7 @@ class TestStateConstruction:
         Vh = _make_Vh(5, 3)
         s = State(value=np.ones(3), basis="v", Vh=Vh, use_dof=np.arange(5), n_dof=10)
         assert s.basis == "v"
-        assert s.nkeep == 3
+        assert s.n_keep == 3
 
     def test_invalid_basis(self):
         with pytest.raises(ValueError, match="basis must be"):
@@ -94,7 +94,7 @@ class TestStateConversions:
         np.testing.assert_allclose(s.x.value, [5.0, 9.0])
 
     def test_x_to_v_roundtrip_full_rank(self):
-        """When nkeep == len(use_dof), x->v->x is lossless."""
+        """When n_keep == len(use_dof), x->v->x is lossless."""
         n_active = 5
         Vh = _make_Vh(n_active, 5)
         xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
@@ -108,10 +108,10 @@ class TestStateConversions:
         np.testing.assert_allclose(s.v.x.value, xvals, atol=1e-12)
 
     def test_x_to_v_lossy_truncated(self):
-        """When nkeep < len(use_dof), x->v->x is lossy."""
+        """When n_keep < len(use_dof), x->v->x is lossy."""
         n_active = 5
-        nkeep = 3
-        Vh = _make_Vh(n_active, nkeep)
+        n_keep = 3
+        Vh = _make_Vh(n_active, n_keep)
         xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         s = State(
             value=xvals,
@@ -153,7 +153,7 @@ class TestStateAdd:
     def test_add_x_states(self):
         rng = np.random.default_rng(423)
         A = rng.standard_normal((30, 10))
-        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=5)
+        sf = StateFactory(A=A, use_dof=np.arange(5), n_keep=5)
 
         s1 = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
         s2 = sf.from_x(np.array([0.5, -1.0, 2.0, 0.0, 1.5]))
@@ -166,7 +166,7 @@ class TestStateAdd:
     def test_add_x_and_f(self):
         rng = np.random.default_rng(422)
         A = rng.standard_normal((30, 10))
-        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=5)
+        sf = StateFactory(A=A, use_dof=np.arange(5), n_keep=5)
 
         sx = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
         ssum = sx + sx.f
@@ -178,7 +178,7 @@ class TestStateAdd:
     def test_add_x_and_v(self):
         rng = np.random.default_rng(421)
         A = rng.standard_normal((30, 10))
-        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=5)
+        sf = StateFactory(A=A, use_dof=np.arange(5), n_keep=5)
 
         sx = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
         ssum = sx + sx.v
@@ -196,8 +196,8 @@ class TestStateAdd:
     def test_add_falls_back_to_f_basis(self):
         rng = np.random.default_rng(424)
         A = rng.standard_normal((30, 10))
-        sf = StateFactory(A=A, use_dof=np.arange(7), nkeep=5)
-        sf2 = StateFactory(A=A, use_dof=np.arange(8), nkeep=5)
+        sf = StateFactory(A=A, use_dof=np.arange(7), n_keep=5)
+        sf2 = StateFactory(A=A, use_dof=np.arange(8), n_keep=5)
 
         s1 = sf.from_x(np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]))
         s2 = sf2.from_x(np.array([0.5, -1.0, 2.0, 0.0, 1.5, -0.5, 0.0, 0.0]))
@@ -232,28 +232,28 @@ class TestStateFactory:
         rng = np.random.default_rng(42)
         A = rng.standard_normal((30, 10))
         use_dof = np.array([0, 2, 4, 6, 8])
-        sf = StateFactory(A=A, use_dof=use_dof, nkeep=3)
+        sf = StateFactory(A=A, use_dof=use_dof, n_keep=3)
         assert sf.n_dof == 10
         assert sf.Vh.shape == (3, 5)
         assert sf.full_Vh.shape == (5, 5)
         assert len(sf.S) == 5
-        assert sf.nkeep == 3
+        assert sf.n_keep == 3
 
-    def test_nkeep_defaults_to_full(self):
+    def test_n_keep_defaults_to_full(self):
         rng = np.random.default_rng(42)
         A = rng.standard_normal((30, 10))
         use_dof = np.arange(5)
         sf = StateFactory(A=A, use_dof=use_dof)
-        assert sf.nkeep == 5
+        assert sf.n_keep == 5
 
     def test_from_x(self):
         rng = np.random.default_rng(42)
         A = rng.standard_normal((30, 10))
-        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=3)
+        sf = StateFactory(A=A, use_dof=np.arange(5), n_keep=3)
         s = sf.from_x(np.ones(5))
         assert s.basis == "x"
         assert s.n_dof == 10
-        assert s.nkeep == 3
+        assert s.n_keep == 3
 
     def test_from_f(self):
         rng = np.random.default_rng(42)
@@ -265,7 +265,7 @@ class TestStateFactory:
     def test_from_v(self):
         rng = np.random.default_rng(42)
         A = rng.standard_normal((30, 10))
-        sf = StateFactory(A=A, use_dof=np.arange(5), nkeep=3)
+        sf = StateFactory(A=A, use_dof=np.arange(5), n_keep=3)
         s = sf.from_v(np.ones(3))
         assert s.basis == "v"
 
@@ -274,7 +274,7 @@ class TestStateFactory:
         rng = np.random.default_rng(42)
         A = rng.standard_normal((30, 10))
         use_dof = np.array([0, 2, 4, 6, 8])
-        sf = StateFactory(A=A, use_dof=use_dof, nkeep=5)
+        sf = StateFactory(A=A, use_dof=use_dof, n_keep=5)
         xvals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         s = sf.from_x(xvals)
         np.testing.assert_allclose(s.f.x.v.x.value, xvals, atol=1e-12)
@@ -311,7 +311,7 @@ class TestStateFactory:
         sens = Sensitivity(nominal=nominal, gradient=gradient)
 
         use_dof = np.arange(n_dof)
-        sf = StateFactory(sens, use_dof=use_dof, nkeep=3)
+        sf = StateFactory(sens, use_dof=use_dof, n_keep=3)
 
         # Design matrix should be (n_field * (jmax+1), n_dof)
         nobs = n_field * (jmax + 1)
@@ -320,7 +320,7 @@ class TestStateFactory:
 
         # Result should match building from the raw array directly
         A_raw = grad_coefs.value.reshape(n_dof, -1).T
-        sf_raw = StateFactory(A=A_raw, use_dof=use_dof, nkeep=3)
+        sf_raw = StateFactory(A=A_raw, use_dof=use_dof, n_keep=3)
         np.testing.assert_allclose(sf.S, sf_raw.S)
 
     def test_from_sensitivity_spots(self):
