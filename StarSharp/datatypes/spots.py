@@ -41,7 +41,7 @@ class Spots:
     px, py : Quantity or None
         Pupil (stop-plane) coordinates of each ray.  1-D arrays of shape
         ``(n_ray,)`` shared across all field points.  Units are typically
-        metres.
+        meters.  Always interpretted as OCS frame.
     """
 
     dx: Quantity

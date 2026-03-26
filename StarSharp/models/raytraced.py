@@ -249,7 +249,7 @@ class RaytracedOpticalModel:
         y_flat = field.y.reshape(total)
         detnum_flat = field.detnum.reshape(total)
 
-        # Broadcast and flatten extra Zernike coefs to (total, jmax+1) in metres.
+        # Broadcast and flatten extra Zernike coefs to (total, jmax+1) in meters.
         # None entries signal "no extra zk for this field point".
         if zk is not None:
             target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
@@ -411,7 +411,7 @@ class RaytracedOpticalModel:
         y_flat = field.y.reshape(total)
         detnum_flat = field.detnum.reshape(total)
 
-        # Broadcast and flatten extra Zernike coefs to (total, jmax_zk+1) in metres.
+        # Broadcast and flatten extra Zernike coefs to (total, jmax_zk+1) in meters.
         if zk is not None:
             target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
             zk_broad = np.broadcast_to(zk.coefs.to_value(u.m), target_shape)
