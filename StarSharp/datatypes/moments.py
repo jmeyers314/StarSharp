@@ -276,12 +276,12 @@ class Moments2(Moments[2]):
     @property
     def e1(self):
         """Ellipticity e1: (xx - yy) / T."""
-        return (self.xx - self.yy) / self.T
+        return ((self.xx - self.yy) / self.T).value
 
     @property
     def e2(self):
         """Ellipticity e2: 2 * xy / T."""
-        return 2 * self.xy / self.T
+        return (2 * self.xy / self.T).value
 
 
 @Moments.specialize(3)

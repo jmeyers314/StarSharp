@@ -441,16 +441,11 @@ class TestMoments2Properties:
 
     def test_e1_value(self):
         m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
-        assert m.e1.value == pytest.approx(-1.0 / 5.0)
+        assert m.e1 == pytest.approx(-1.0 / 5.0)
 
     def test_e2_value(self):
         m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
-        assert m.e2.value == pytest.approx(2.0 / 5.0)
-
-    def test_e1_e2_dimensionless(self):
-        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
-        assert m.e1.unit == u.dimensionless_unscaled
-        assert m.e2.unit == u.dimensionless_unscaled
+        assert m.e2 == pytest.approx(2.0 / 5.0)
 
 
 class TestMomentsSpin:
