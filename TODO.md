@@ -8,6 +8,10 @@
 - [ ] Compare StarSharp/MTAOS vmodes
 - [ ] Check that sensitivity in zernikeGQ is consistent with sensitivity in zernikeTA
 - [ ] Compare on-the-fly computed intrinsic to value from butler
+- [ ] LinearModel(RaytracedModel) for a single RTP.  Could be useful for focal-plane fitting.
+      Could be hybrid of RaytracedModel + pre-built sensitivity matrix for dof.
+- [ ] Single focal plane ellipticities/spots as a test dataset.
+- [ ] Check sensitivity to plate scale!
 
 ## Medium Priority
 - [ ] Data access classes
