@@ -23,15 +23,6 @@ class Moments:
     All moment fields are `~astropy.units.Quantity` instances.
     Use ``frame`` to record the coordinate frame (``'ocs'`` or ``'ccs'``)
     and ``field`` to attach the corresponding `FieldCoords`.
-
-    Use the ``@Moments.specialize(order)`` decorator to register a
-    specialized subclass for a given order.  Once registered,
-    ``Moments[order]`` returns the specialized class.
-
-    Examples
-    --------
-    >>> m2 = Moments[2](xx=1.0*u.mm**2, xy=0.0*u.mm**2, yy=1.0*u.mm**2)
-    >>> m3 = Moments[3](xxx=0.0*u.mm**3, xxy=0.0*u.mm**3, xyy=0.0*u.mm**3, yyy=0.0*u.mm**3)
     """
 
     _cache: dict = {}
@@ -136,7 +127,6 @@ class Moments:
         ]
         new_moments = {}
         for name in moment_names:
-            # Swap x↔y in the name then re-sort to canonical form
             canonical_swapped = "".join(
                 sorted("y" if ch == "x" else "x" for ch in name)
             )
@@ -173,7 +163,6 @@ class Moments:
             return self._relabel("ccs")
         if self.frame == "dvcs":
             return self._swap("ccs")
-        # ocs
         rtp = self._require("rtp")
         return self._rot(rtp, "ccs")
 
@@ -191,46 +180,44 @@ class Moments:
             return self
         return self.ccs._swap("dvcs")
 
-    def spin(self, n, m):
-        """Return the (n, m) spin-decomposed moment component.
+    def spin_complex(self, m: int) -> Quantity:
+        """Return the complex spin-m moment for this order-N Moments (m>=0).
 
-        Uses the complex representation z = x + iy to decompose the
-        symmetric moment tensor into spin components via
-        M_{p,q} = <z^p zbar^q> where p = (order+n)/2, q = (order-n)/2.
+        Let N = self._moment_order and z = x + i y. For a given spin m,
+        define p=(N+m)/2 and q=(N-m)/2 (requires same parity). Then:
+
+            M_m = < z^p zbar^q >
+
+        Under rotation, M_m transforms by a phase exp(± i m theta) depending
+        on rotation convention; this method just computes M_m from the tensor.
 
         Parameters
         ----------
-        n : int
-            Spin quantum number.  Must be non-negative, <= order, and
-            have the same parity as the moment order.
         m : int
-            Selects the real (+n) or imaginary (-n) part.  Must be
-            +n or -n (or 0 when n = 0).
+            Spin magnitude. Must satisfy 0 <= m <= N with same parity as N.
 
         Returns
         -------
-        Quantity
-            The spin-decomposed moment component (unnormalized).
+        Quantity (complex-valued)
+            Complex spin moment M_m with the same unit as the order-N moments.
         """
-        order = self._moment_order
-        if n < 0 or n > order or (n % 2) != (order % 2):
+        N = self._moment_order
+        if m < 0:
+            raise ValueError("m must be >= 0 for spin_complex()")
+        if m > N or (m % 2) != (N % 2):
             raise ValueError(
-                f"Invalid spin n={n} for order-{order} moments; "
-                f"n must satisfy 0 <= n <= {order} with same parity"
+                f"Invalid spin m={m} for order-{N} moments; "
+                f"m must satisfy 0 <= m <= {N} with same parity as {N}"
             )
-        if n == 0 and m != 0:
-            raise ValueError(f"For n=0, m must be 0, got m={m}")
-        if n > 0 and m not in (n, -n):
-            raise ValueError(f"For n={n}, m must be +/-{n}, got m={m}")
 
-        p = (order + n) // 2
-        q = (order - n) // 2
+        p = (N + m) // 2
+        q = (N - m) // 2
 
         T = self._tensor()
-        unit = getattr(self, "x" * order).unit
+        unit = getattr(self, "x" * N).unit
 
-        ez = np.array([1, 1j])
-        ezbar = np.array([1, -1j])
+        ez = np.array([1.0, 1.0j])
+        ezbar = np.array([1.0, -1.0j])
 
         result = T
         for _ in range(p):
@@ -238,15 +225,41 @@ class Moments:
         for _ in range(q):
             result = np.tensordot(result, ezbar, axes=([-1], [0]))
 
+        return result * unit
+
+    def spin_pair(self, m: int):
+        """Return (cos, sin) components for spin m (m>=0).
+
+        For m=0, returns (scalar, None).
+        For m>0, returns:
+            cos = Re(M_m), sin = Im(M_m)
+        """
+        M = self.spin_complex(m)
+        if m == 0:
+            return M.real, None
+        return M.real, M.imag
+
+    def spin_cos(self, m: int) -> Quantity:
+        """Cosine (real) component of spin m (m>=0)."""
+        return self.spin_complex(m).real
+
+    def spin_sin(self, m: int) -> Quantity:
+        """Sine (imag) component of spin m (m>0)."""
+        if m <= 0:
+            raise ValueError("m must be > 0 for spin_sin()")
+        return self.spin_complex(m).imag
+
+    def spin(self, m: int) -> Quantity:
+        """Alias for spin_cos(m)."""
         if m >= 0:
-            return result.real * unit
+            return self.spin_cos(m)
         else:
-            return result.imag * unit
+            return self.spin_sin(-m)
 
 
 @Moments.specialize(2)
 class Moments2(Moments[2]):
-    """Second-order moments with hard-coded coordinate transformations.
+    """Second-order moments.
 
     Fields: ``xx``, ``xy``, ``yy``.
 
@@ -273,24 +286,24 @@ class Moments2(Moments[2]):
 
 @Moments.specialize(3)
 class Moments3(Moments[3]):
-    """Third-order moments with hard-coded coordinate transformations.
+    """Third-order moments.
 
     Fields: ``xxx``, ``xxy``, ``xyy``, ``yyy``.
 
-    Spin decomposition:
-      - Spin-1 components: ``xxx + xyy``, ``yyy + xxy``
-      - Spin-3 components: ``xxx - 3*xyy``, ``yyy - 3*xxy``
+    Spin decomposition (cos,sin from Re/Im of M_m):
+      - Spin-1: Re<z^2 zbar> = xxx + xyy, Im<z^2 zbar> = xxy + yyy
+      - Spin-3: Re<z^3> = xxx - 3*xyy, Im<z^3> = 3*xxy - yyy
     """
 
 
 @Moments.specialize(4)
 class Moments4(Moments[4]):
-    """Fourth-order moments with hard-coded coordinate transformations.
+    """Fourth-order moments.
 
     Fields: ``xxxx``, ``xxxy``, ``xxyy``, ``xyyy``, ``yyyy``.
 
     Spin decomposition:
-      - Spin-0 (scalar): ``xxxx + 2*xxyy + yyyy``
-      - Spin-2 components: ``xxxx - yyyy``, ``2*(xxxy + xyyy)``
-      - Spin-4 components: ``xxxx - 6*xxyy + yyyy``, ``4*(xxxy - xyyy)``
+      - Spin-0 (scalar): Re<z^2 zbar^2> = xxxx + 2*xxyy + yyyy
+      - Spin-2: Re<z^3 zbar> = xxxx - yyyy, Im<z^3 zbar> = 2*(xxxy + xyyy)
+      - Spin-4: Re<z^4> = xxxx - 6*xxyy + yyyy, Im<z^4> = 4*(xxxy - xyyy)
     """

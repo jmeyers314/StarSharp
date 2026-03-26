@@ -377,7 +377,6 @@ class TestMomentsNewFrames:
         m = self._m2(frame="ccs", rtp=RTP)
         dvcs = m.dvcs
         assert dvcs.frame == "dvcs"
-        # dvcs.xx = ccs.yy, dvcs.xy = ccs.xy, dvcs.yy = ccs.xx
         np.testing.assert_allclose(dvcs.xx.value, m.yy.value)
         np.testing.assert_allclose(dvcs.xy.value, m.xy.value)
         np.testing.assert_allclose(dvcs.yy.value, m.xx.value)
@@ -428,7 +427,6 @@ class TestMomentsNewFrames:
             rtp=RTP,
         )
         dvcs = m.dvcs
-        # dvcs.xxx = ccs.yyy, dvcs.xxy = ccs.xyy, dvcs.xyy = ccs.xxy, dvcs.yyy = ccs.xxx
         np.testing.assert_allclose(dvcs.xxx.value, m.yyy.value)
         np.testing.assert_allclose(dvcs.xxy.value, m.xyy.value)
         np.testing.assert_allclose(dvcs.xyy.value, m.xxy.value)
@@ -456,19 +454,17 @@ class TestMoments2Properties:
 
 
 class TestMomentsSpin:
-    def test_spin00_moments2(self):
+    def test_spin0_moments2(self):
         m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
-        np.testing.assert_allclose(m.spin(0, 0).value, (m.xx + m.yy).value, atol=1e-12)
+        np.testing.assert_allclose(m.spin_cos(0).value, (m.xx + m.yy).value, atol=1e-12)
 
-    def test_spin22_moments2(self):
+    def test_spin2_moments2(self):
         m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
-        np.testing.assert_allclose(m.spin(2, 2).value, (m.xx - m.yy).value, atol=1e-12)
+        c, s = m.spin_pair(2)
+        np.testing.assert_allclose(c.value, (m.xx - m.yy).value, atol=1e-12)
+        np.testing.assert_allclose(s.value, (2 * m.xy).value, atol=1e-12)
 
-    def test_spin2_neg2_moments2(self):
-        m = Moments2(xx=2.0 * u.mm**2, xy=1.0 * u.mm**2, yy=3.0 * u.mm**2)
-        np.testing.assert_allclose(m.spin(2, -2).value, (2 * m.xy).value, atol=1e-12)
-
-    def test_spin00_moments4(self):
+    def test_spin0_moments4(self):
         m = Moments4(
             xxxx=1.0 * u.mm**4,
             xxxy=0.5 * u.mm**4,
@@ -477,22 +473,17 @@ class TestMomentsSpin:
             yyyy=1.0 * u.mm**4,
         )
         expected = (m.xxxx + 2 * m.xxyy + m.yyyy).value
-        np.testing.assert_allclose(m.spin(0, 0).value, expected, atol=1e-12)
+        np.testing.assert_allclose(m.spin_cos(0).value, expected, atol=1e-12)
 
     def test_invalid_spin_raises(self):
         m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
         with pytest.raises(ValueError, match="Invalid spin"):
-            m.spin(1, 1)  # wrong parity for order 2
+            m.spin_complex(1)  # wrong parity for order 2
 
-    def test_invalid_m_raises(self):
+    def test_spin_sin_requires_positive_m(self):
         m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
-        with pytest.raises(ValueError, match="m must be"):
-            m.spin(2, 0)  # m must be +/-2
-
-    def test_spin0_m_nonzero_raises(self):
-        m = Moments2(xx=1.0 * u.mm**2, xy=0.0 * u.mm**2, yy=1.0 * u.mm**2)
-        with pytest.raises(ValueError, match="m must be 0"):
-            m.spin(0, 1)
+        with pytest.raises(ValueError, match="m must be > 0"):
+            m.spin_sin(0)
 
     def test_spin2_invariant_under_180deg(self):
         rtp = Angle(np.pi, unit=u.rad)
@@ -504,13 +495,11 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         m_rot = m.ccs
-        for mm in (2, -2):
-            np.testing.assert_allclose(
-                m_rot.spin(2, mm).value,
-                m.spin(2, mm).value,
-                atol=1e-12,
-                err_msg=f"spin(2, {mm}) not invariant under 180-deg rotation",
-            )
+        for mm in (2,):
+            c0, s0 = m.spin_pair(mm)
+            c1, s1 = m_rot.spin_pair(mm)
+            np.testing.assert_allclose(c1.value, c0.value, atol=1e-12)
+            np.testing.assert_allclose(s1.value, s0.value, atol=1e-12)
 
     def test_spin0_invariant_under_180deg(self):
         rtp = Angle(np.pi, unit=u.rad)
@@ -522,8 +511,8 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         np.testing.assert_allclose(
-            m.ccs.spin(0, 0).value,
-            m.spin(0, 0).value,
+            m.ccs.spin_cos(0).value,
+            m.spin_cos(0).value,
             atol=1e-12,
         )
 
@@ -538,13 +527,10 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         m_rot = m.ccs
-        for mm in (3, -3):
-            np.testing.assert_allclose(
-                m_rot.spin(3, mm).value,
-                m.spin(3, mm).value,
-                atol=1e-12,
-                err_msg=f"spin(3, {mm}) not invariant under 120-deg rotation",
-            )
+        c0, s0 = m.spin_pair(3)
+        c1, s1 = m_rot.spin_pair(3)
+        np.testing.assert_allclose(c1.value, c0.value, atol=1e-12)
+        np.testing.assert_allclose(s1.value, s0.value, atol=1e-12)
 
     def test_spin1_invariant_under_360deg(self):
         rtp = Angle(2 * np.pi, unit=u.rad)
@@ -557,13 +543,10 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         m_rot = m.ccs
-        for mm in (1, -1):
-            np.testing.assert_allclose(
-                m_rot.spin(1, mm).value,
-                m.spin(1, mm).value,
-                atol=1e-12,
-                err_msg=f"spin(1, {mm}) not invariant under 360-deg rotation",
-            )
+        c0, s0 = m.spin_pair(1)
+        c1, s1 = m_rot.spin_pair(1)
+        np.testing.assert_allclose(c1.value, c0.value, atol=1e-12)
+        np.testing.assert_allclose(s1.value, s0.value, atol=1e-12)
 
     def test_spin4_invariant_under_90deg(self):
         rtp = Angle(np.pi / 2, unit=u.rad)
@@ -577,13 +560,10 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         m_rot = m.ccs
-        for mm in (4, -4):
-            np.testing.assert_allclose(
-                m_rot.spin(4, mm).value,
-                m.spin(4, mm).value,
-                atol=1e-12,
-                err_msg=f"spin(4, {mm}) not invariant under 90-deg rotation",
-            )
+        c0, s0 = m.spin_pair(4)
+        c1, s1 = m_rot.spin_pair(4)
+        np.testing.assert_allclose(c1.value, c0.value, atol=1e-12)
+        np.testing.assert_allclose(s1.value, s0.value, atol=1e-12)
 
     def test_spin2_invariant_under_180deg_order4(self):
         rtp = Angle(np.pi, unit=u.rad)
@@ -597,13 +577,10 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         m_rot = m.ccs
-        for mm in (2, -2):
-            np.testing.assert_allclose(
-                m_rot.spin(2, mm).value,
-                m.spin(2, mm).value,
-                atol=1e-12,
-                err_msg=f"spin(2, {mm}) of order-4 not invariant under 180-deg rotation",
-            )
+        c0, s0 = m.spin_pair(2)
+        c1, s1 = m_rot.spin_pair(2)
+        np.testing.assert_allclose(c1.value, c0.value, atol=1e-12)
+        np.testing.assert_allclose(s1.value, s0.value, atol=1e-12)
 
     def test_spin0_invariant_under_arbitrary_rotation(self):
         rtp = Angle(1.234, unit=u.rad)
@@ -624,13 +601,13 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         np.testing.assert_allclose(
-            m2.ccs.spin(0, 0).value,
-            m2.spin(0, 0).value,
+            m2.ccs.spin_cos(0).value,
+            m2.spin_cos(0).value,
             atol=1e-12,
         )
         np.testing.assert_allclose(
-            m4.ccs.spin(0, 0).value,
-            m4.spin(0, 0).value,
+            m4.ccs.spin_cos(0).value,
+            m4.spin_cos(0).value,
             atol=1e-12,
         )
 
@@ -644,12 +621,15 @@ class TestMomentsSpin:
             rtp=rtp,
         )
         m_rot = m.ccs
-        assert not np.allclose(m_rot.spin(2, 2).value, m.spin(2, 2).value, atol=1e-12)
+        # compare spin-2 cosine component
+        assert not np.allclose(
+            m_rot.spin_cos(2).value, m.spin_cos(2).value, atol=1e-12
+        )
 
     def test_spin_batched(self):
         """spin() works on batched moments from compute_moments."""
         sp = _make_spots_batched(n_field=4, n_ray=500)
         m2 = sp.compute_moments(order=2)
-        s00 = m2.spin(0, 0)
+        s00 = m2.spin_cos(0)
         assert s00.value.shape == (4,)
         np.testing.assert_allclose(s00.value, (m2.xx + m2.yy).value, atol=1e-12)
