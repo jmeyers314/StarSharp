@@ -229,7 +229,7 @@ class Spots:
     def __repr__(self) -> str:
         return f"Spots(frame={self.frame!r})"
 
-    def compute_moments(self, order: int = 2):
+    def moments(self, order: int = 2):
         """Compute 2d moments of the spot diagrams (excluding vignetted spots).
 
         Parameters

@@ -622,9 +622,9 @@ class TestMomentsSpin:
         )
 
     def test_spin_batched(self):
-        """spin() works on batched moments from compute_moments."""
+        """spin() works on batched moments from moments."""
         sp = _make_spots_batched(n_field=4, n_ray=500)
-        m2 = sp.compute_moments(order=2)
+        m2 = sp.moments(order=2)
         s00 = m2.spin_cos(0)
         assert s00.value.shape == (4,)
         np.testing.assert_allclose(s00.value, (m2.xx + m2.yy).value, atol=1e-12)
