@@ -134,7 +134,7 @@ class RaytracedOpticalModel:
         ----------
         nx : int
             Number of grid points per axis within each detector (default: 1,
-            i.e. the detector centre).
+            i.e. the detector center).
         frame : str
             Output coordinate frame (default: ``'ocs'``).
         types : tuple[str, ...]
@@ -146,6 +146,8 @@ class RaytracedOpticalModel:
         -------
         FieldCoords
         """
+        if isinstance(types, str): # Turn "ITL" into ("ITL",)
+            types = (types,)
         if self.camera is None:
             raise ValueError("Camera must be set on the model to use this method")
         if detnums is None:
@@ -249,7 +251,7 @@ class RaytracedOpticalModel:
         y_flat = field.y.reshape(total)
         detnum_flat = field.detnum.reshape(total)
 
-        # Broadcast and flatten extra Zernike coefs to (total, jmax+1) in metres.
+        # Broadcast and flatten extra Zernike coefs to (total, jmax+1) in meters.
         # None entries signal "no extra zk for this field point".
         if zk is not None:
             target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
@@ -411,7 +413,7 @@ class RaytracedOpticalModel:
         y_flat = field.y.reshape(total)
         detnum_flat = field.detnum.reshape(total)
 
-        # Broadcast and flatten extra Zernike coefs to (total, jmax_zk+1) in metres.
+        # Broadcast and flatten extra Zernike coefs to (total, jmax_zk+1) in meters.
         if zk is not None:
             target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
             zk_broad = np.broadcast_to(zk.coefs.to_value(u.m), target_shape)
@@ -630,6 +632,7 @@ class RaytracedOpticalModel:
             state=offset,
             jmax=jmax,
             rings=rings,
+            algorithm=algorithm,
         )
 
         perturbed = []

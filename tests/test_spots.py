@@ -244,42 +244,42 @@ class TestSpotsPupilCoords:
 class TestSpotsComputeMoments:
     def test_returns_moments_instance(self):
         sp = _make_spots_single()
-        m = sp.compute_moments(order=2)
+        m = sp.moments(order=2)
         assert isinstance(m, Moments)
 
     def test_returns_moments2(self):
         sp = _make_spots_single()
-        assert isinstance(sp.compute_moments(order=2), Moments[2])
+        assert isinstance(sp.moments(order=2), Moments[2])
 
     def test_returns_moments3(self):
         sp = _make_spots_single()
-        assert isinstance(sp.compute_moments(order=3), Moments[3])
+        assert isinstance(sp.moments(order=3), Moments[3])
 
     def test_returns_moments4(self):
         sp = _make_spots_single()
-        assert isinstance(sp.compute_moments(order=4), Moments[4])
+        assert isinstance(sp.moments(order=4), Moments[4])
 
     def test_frame_propagated(self):
         sp = _make_spots_single()
-        assert sp.compute_moments(order=2).frame == sp.frame
+        assert sp.moments(order=2).frame == sp.frame
 
     def test_rtp_propagated(self):
         sp = _make_spots_single()
-        assert sp.compute_moments(order=2).rtp is sp.rtp
+        assert sp.moments(order=2).rtp is sp.rtp
 
     def test_field_propagated(self):
         sp = _make_spots_single()
-        assert sp.compute_moments(order=2).field is sp.field
+        assert sp.moments(order=2).field is sp.field
 
     def test_order_too_low_raises(self):
         sp = _make_spots_single()
         with pytest.raises(ValueError):
-            sp.compute_moments(order=0)
+            sp.moments(order=0)
 
     def test_units_are_micron_power_order(self):
         sp = _make_spots_single()
         for order in (2, 3, 4):
-            m = sp.compute_moments(order=order)
+            m = sp.moments(order=order)
             names = [
                 "".join(p) for p in itertools.combinations_with_replacement("xy", order)
             ]
@@ -298,23 +298,23 @@ class TestSpotsComputeMoments:
         field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg)
         sp_full = Spots(dx=dx, dy=dy, vignetted=vig_none, field=field)
         sp_half = Spots(dx=dx, dy=dy, vignetted=vig_half, field=field)
-        m_full = sp_full.compute_moments(order=2)
-        m_half = sp_half.compute_moments(order=2)
+        m_full = sp_full.moments(order=2)
+        m_half = sp_half.moments(order=2)
         assert not np.isclose(m_full.xx.value, m_half.xx.value)
 
     def test_batched_moment_fields_are_arrays(self):
         sp = _make_spots_batched(n_field=4)
-        m = sp.compute_moments(order=2)
+        m = sp.moments(order=2)
         assert m.xx.shape == (4,)
         assert m.yy.shape == (4,)
         assert m.xy.shape == (4,)
 
     def test_batched_agrees_with_single_per_field(self):
-        """Batched compute_moments matches looping over single field-point spots."""
+        """Batched moments matches looping over single field-point spots."""
         sp = _make_spots_batched(n_field=3, n_ray=300)
-        m_batched = sp.compute_moments(order=2)
+        m_batched = sp.moments(order=2)
         for i in range(3):
-            m_single = sp[i].compute_moments(order=2)
+            m_single = sp[i].moments(order=2)
             for name in ("xx", "xy", "yy"):
                 np.testing.assert_allclose(
                     getattr(m_batched, name)[i].value,
@@ -337,20 +337,20 @@ class TestSpotsComputeMoments:
         )
         sp_vig = Spots(dx=dx, dy=dy, vignetted=vig, field=field)
         sp_none = Spots(dx=dx, dy=dy, vignetted=np.zeros_like(vig), field=field)
-        m_vig = sp_vig.compute_moments(order=2)
-        m_none = sp_none.compute_moments(order=2)
+        m_vig = sp_vig.moments(order=2)
+        m_none = sp_none.moments(order=2)
         np.testing.assert_allclose(m_vig.xx[0].value, m_none.xx[0].value)
         np.testing.assert_allclose(m_vig.xx[2].value, m_none.xx[2].value)
         assert not np.isclose(m_vig.xx[1].value, m_none.xx[1].value)
 
     @pytest.mark.parametrize("order", [2, 3, 4, 5])
     def test_moments_rotate_consistent_with_spots_rotate_single(self, order):
-        """Single field point: moments_ccs.ocs == spots_ocs.compute_moments."""
+        """Single field point: moments_ccs.ocs == spots_ocs.moments."""
         sp_ccs = _make_spots_single(n_ray=500)
         assert sp_ccs.frame == "ccs"
 
-        m_via_rotate = sp_ccs.compute_moments(order=order).ocs
-        m_via_spots = sp_ccs.ocs.compute_moments(order=order)
+        m_via_rotate = sp_ccs.moments(order=order).ocs
+        m_via_spots = sp_ccs.ocs.moments(order=order)
 
         assert m_via_rotate.frame == "ocs"
         assert m_via_spots.frame == "ocs"
@@ -365,18 +365,18 @@ class TestSpotsComputeMoments:
                 rtol=1e-10,
                 err_msg=(
                     f"order={order}, moment {name}: "
-                    "moments_ccs.ocs != spots_ocs.compute_moments"
+                    "moments_ccs.ocs != spots_ocs.moments"
                 ),
             )
 
     @pytest.mark.parametrize("order", [2, 3, 4, 5])
     def test_moments_rotate_consistent_with_spots_rotate_batched(self, order):
-        """Batched field points: moments_ccs.ocs == spots_ocs.compute_moments."""
+        """Batched field points: moments_ccs.ocs == spots_ocs.moments."""
         sp_ccs = _make_spots_batched(n_field=4, n_ray=500)
         assert sp_ccs.frame == "ccs"
 
-        m_via_rotate = sp_ccs.compute_moments(order=order).ocs
-        m_via_spots = sp_ccs.ocs.compute_moments(order=order)
+        m_via_rotate = sp_ccs.moments(order=order).ocs
+        m_via_spots = sp_ccs.ocs.moments(order=order)
 
         assert m_via_rotate.frame == "ocs"
         assert m_via_spots.frame == "ocs"
@@ -391,7 +391,7 @@ class TestSpotsComputeMoments:
                 rtol=1e-10,
                 err_msg=(
                     f"order={order}, moment {name}: "
-                    "batched moments_ccs.ocs != spots_ocs.compute_moments"
+                    "batched moments_ccs.ocs != spots_ocs.moments"
                 ),
             )
 

@@ -915,7 +915,7 @@ import galsim
 
 
 def _expected_dz_coefs_flat(dz, field):
-    """Compute expected per-field Zernike coefs (metres, flat) from a DoubleZernikes."""
+    """Compute expected per-field Zernike coefs (meters, flat) from a DoubleZernikes."""
     x = field.x.to_value(u.deg)
     y = field.y.to_value(u.deg)
     B = np.moveaxis(

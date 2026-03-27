@@ -37,7 +37,7 @@ class Sensitivity:
     gradient: object
     nominal: object | None = None
     basis: str = "x"
-    use_dof: NDArray[np.integer] | None = None
+    use_dof: NDArray[np.integer] | str | None = None
     n_dof: int | None = None
     Vh: NDArray[np.floating] | None = None
 
@@ -45,6 +45,16 @@ class Sensitivity:
         return cls
 
     def __post_init__(self):
+        if isinstance(self.use_dof, str):
+            dof_str = self.use_dof.replace(" ", "").strip()
+            parsed = []
+            for part in dof_str.split(","):
+                if "-" in part:
+                    start, end = [int(p) for p in part.split("-")]
+                    parsed.extend(range(start, end + 1))
+                else:
+                    parsed.append(int(part))
+            object.__setattr__(self, "use_dof", np.sort(parsed))
         if self.nominal is None:
             # Set nominal to zeroed-out first gradient slice.
             # Copy broadcast fields (e.g. vignetted for Spots) unchanged.
