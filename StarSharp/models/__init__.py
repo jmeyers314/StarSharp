@@ -1,4 +1,4 @@
-from .linear import LinearOpticalModel
+from .linear import LinearSpotModel
 from .raytraced import RaytracedOpticalModel
 
-__all__ = ["LinearOpticalModel", "RaytracedOpticalModel"]
+__all__ = ["LinearSpotModel", "RaytracedOpticalModel"]
