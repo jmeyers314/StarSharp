@@ -134,7 +134,7 @@ class RaytracedOpticalModel:
         ----------
         nx : int
             Number of grid points per axis within each detector (default: 1,
-            i.e. the detector centre).
+            i.e. the detector center).
         frame : str
             Output coordinate frame (default: ``'ocs'``).
         types : tuple[str, ...]
@@ -146,6 +146,8 @@ class RaytracedOpticalModel:
         -------
         FieldCoords
         """
+        if isinstance(types, str): # Turn "ITL" into ("ITL",)
+            types = (types,)
         if self.camera is None:
             raise ValueError("Camera must be set on the model to use this method")
         if detnums is None:
@@ -630,6 +632,7 @@ class RaytracedOpticalModel:
             state=offset,
             jmax=jmax,
             rings=rings,
+            algorithm=algorithm,
         )
 
         perturbed = []
