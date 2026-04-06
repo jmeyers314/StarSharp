@@ -8,6 +8,7 @@
 - [ ] Spot "convolution" by outer sum with Gaussian distribution.
 - [ ] Weighted moments both in simulation and data.  Use the same 2D weight.
 - [ ] Fitter for moments
+- [ ] Need to linearize Spots.field too since that's an output.
 
 ## Medium Priority
 - [ ] Compare zernikeGQ sensitivity to zernikeTA sensitivity
