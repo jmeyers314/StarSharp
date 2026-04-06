@@ -23,12 +23,16 @@ class Zernikes:
     coefs : Quantity
         Zernike coefficient array.  The last axis indexes Noll
         index *j* (0 … jmax).  Leading axes are batch dimensions.
+    field : FieldCoords
+        Field coordinates for each set of coefficients.
     R_outer : float
         Outer radius of the annular pupil.
     R_inner : float
         Inner radius of the annular pupil.
-    jmax : int or None
-        Maximum Noll index.  Inferred from ``coefs`` if *None*.
+    wavelength : Quantity or None
+        Wavelength of the coefficients.  Optional, but required for some
+    frame: str
+        Coordinate frame of the coefficients.  Must be "ocs" or "ccs".
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
     """
