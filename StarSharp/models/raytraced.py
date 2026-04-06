@@ -40,6 +40,8 @@ class RaytracedOpticalModel:
         LSST camera geometry object.  Required for methods that need
         detector-level information (e.g. :meth:`make_ccd_field`,
         :meth:`spots`).
+    offset : State or None
+        Optional fixed offset applied to the AOS DOFs before ray tracing.
     tqdm : callable or None
         Progress-bar factory (e.g. ``tqdm.tqdm``).  When provided, a bar
         is shown during long ray-tracing loops.
@@ -51,6 +53,7 @@ class RaytracedOpticalModel:
         rtp: Angle,
         wavelength: float,
         camera: Camera | None = None,
+        offset: State | None = None,
         tqdm: tqdm | None = None,
     ):
         self.builder = builder
@@ -58,6 +61,12 @@ class RaytracedOpticalModel:
         self.fiducial = builder.with_rtp(rtp).build()
         self.wavelength = wavelength
         self.camera = camera
+        if offset is None:
+            offset = State(
+                value=np.zeros(50, dtype=np.float64),
+                basis="f",
+            )
+        self.offset = offset
         self.tqdm = tqdm
 
         # Living a little dangerously here by assuming the builder's use_m1m3_modes and
@@ -72,15 +81,15 @@ class RaytracedOpticalModel:
                 10.0,
                 10.0,  # M2 rx, ry
                 10.0,  # cam dz
-                2000.0,
-                2000.0,  # cam dx, dy
+                500.0,
+                500.0,  # cam dx, dy
                 10.0,
                 10.0,  # cam rx, ry
             ]
             self.steps += [0.1] * 40  # bending modes
             if self.builder.dof_angle_units == "degree":
-                self.steps[3:5] = [0.003, 0.003]
-                self.steps[8:10] = [0.003, 0.003]
+                self.steps[3:5] = [10./3600, 10./3600]  # M2 rx, ry
+                self.steps[8:10] = [10./3600, 10./3600]  # cam rx, ry
             self.steps = np.array(self.steps)
         else:
             self.steps = None
@@ -188,7 +197,9 @@ class RaytracedOpticalModel:
         state: State | None = None,
         zk: Zernikes | DoubleZernikes | None = None,
         nrad: int = 10,
-        reference: Literal["chief", "mean"] = "chief",
+        reference: Literal["chief", "mean", "ring"] = "ring",
+        include_chip_heights: bool = True,
+        focus="focal",
     ) -> Spots:
         """Trace rays and return spot diagrams.
 
@@ -214,6 +225,12 @@ class RaytracedOpticalModel:
             Whether to center spot diagrams on the chief ray intersection,
             the mean intersection of all unvignetted rays, or the mean of a
             ring of (possibly vignetted) rays.
+        include_chip_heights : bool
+            Whether to include the effect of CCD chip height variations in the
+            spot diagrams.
+        focus : {"intra", "extra", "focal"}
+            Whether to compute spots at the intra-focal plane, extra-focal
+            plane, or nominal focal plane.
 
         Returns
         -------
@@ -240,7 +257,13 @@ class RaytracedOpticalModel:
 
         builder = self.builder.with_rtp(self.rtp)
         if state is not None:
-            builder = builder.with_aos_dof(state.f.value)
+            builder = builder.with_aos_dof((state + self.offset).f.value)
+        else:
+            builder = builder.with_aos_dof(self.offset.f.value)
+        if focus == "intra":
+            builder = builder.with_intra()
+        elif focus == "extra":
+            builder = builder.with_extra()
 
         # Flatten batch dims so we iterate over every field point individually,
         # then reshape outputs back to (*batch_shape, nfield, ...).
@@ -279,7 +302,10 @@ class RaytracedOpticalModel:
                 bar.update(1)
             if detnum == -1:
                 continue
-            telescope = this_builder.build_det(detnum)
+            if include_chip_heights:
+                telescope = this_builder.build_det(detnum)
+            else:
+                telescope = this_builder.build()
             rays = batoid.RayVector.fromStop(
                 np.array(px),
                 np.array(py),
@@ -359,7 +385,10 @@ class RaytracedOpticalModel:
         zk: Zernikes | DoubleZernikes | None = None,
         jmax: int = 28,
         rings: int = 10,
+        reference: Literal["chief", "mean", "ring"] = "ring",
         algorithm: Literal["ta", "gq"] = "gq",
+        include_chip_heights: bool = True,
+        focus="focal",
     ) -> Zernikes:
         """Compute Zernike wavefront coefficients.
 
@@ -383,9 +412,19 @@ class RaytracedOpticalModel:
         rings : int
             Number of radial rings for computing zernikes.
             (default: 10).
+        reference : Literal["chief", "mean", "ring"]
+            Whether to compute Zernikes relative to the chief ray intersection,
+            the mean intersection of all unvignetted rays, or the mean of a
+            ring of (possibly vignetted) rays.
         algorithm : Literal["ta", "gq"]
             Algorithm to use for computing zernikes.  "ta" uses the
             transverse aberration approach, "gq" uses Gaussian quadrature.
+        include_chip_heights : bool
+            Whether to include the effect of CCD chip height variations in the
+            spot diagrams.
+        focus : {"intra", "extra", "focal"}
+            Whether to compute Zernikes at the intra-focal plane, extra-focal
+            plane, or nominal focal plane.
 
         Returns
         -------
@@ -402,7 +441,13 @@ class RaytracedOpticalModel:
             zk = zk.single(field)
         builder = self.builder.with_rtp(self.rtp)
         if state is not None:
-            builder = builder.with_aos_dof(state.f.value)
+            builder = builder.with_aos_dof((state + self.offset).f.value)
+        else:
+            builder = builder.with_aos_dof(self.offset.f.value)
+        if focus == "intra":
+            builder = builder.with_intra()
+        elif focus == "extra":
+            builder = builder.with_extra()
 
         # Flatten batch dims so we iterate over every field point individually,
         # then reshape outputs back to (*batch_shape, nfield, jmax+1).
@@ -435,7 +480,10 @@ class RaytracedOpticalModel:
             if detnum == -1:
                 zk_out.append(np.full(jmax + 1, np.nan))
                 continue
-            telescope = this_builder.build_det(detnum)
+            if include_chip_heights:
+                telescope = this_builder.build_det(detnum)
+            else:
+                telescope = this_builder.build()
             if algorithm == "gq":
                 try:
                     zk1 = batoid.zernikeGQ(
@@ -446,6 +494,7 @@ class RaytracedOpticalModel:
                         rings=rings,
                         jmax=jmax,
                         eps=PUPIL_INNER / PUPIL_OUTER,
+                        reference=reference,
                     )
                 except ValueError:
                     zk1 = np.full(jmax + 1, np.nan)
@@ -461,6 +510,7 @@ class RaytracedOpticalModel:
                         jmax=jmax,
                         eps=PUPIL_INNER / PUPIL_OUTER,
                         focal_length=10.31,
+                        reference=reference,
                     )
                 except ValueError:
                     zk1 = np.full(jmax + 1, np.nan)
@@ -534,7 +584,6 @@ class RaytracedOpticalModel:
         self,
         guess: State,
         field: FieldCoords,
-        offset: State | None = None,
         nrad: int = 10,
         mode: str = "dx",
         **kwargs,
@@ -551,8 +600,6 @@ class RaytracedOpticalModel:
             Initial state; its ``use_dof`` defines which DOFs are free.
         field : FieldCoords
             Field coordinates to evaluate.
-        offset : State or None
-            Fixed additive offset applied before optimization.
         nrad : int
             Pupil sampling rings passed to :meth:`spots`.
         mode : str
@@ -575,7 +622,7 @@ class RaytracedOpticalModel:
             func,
             x0,
             x_scale=self.steps[guess.use_dof],
-            args=(field, nrad, guess.use_dof, offset),
+            args=(field, nrad, guess.use_dof),
             **kwargs,
         )
         return State(
@@ -591,9 +638,10 @@ class RaytracedOpticalModel:
         steps: State,
         jmax: int = 28,
         rings: int = 10,
+        reference: Literal["chief", "mean", "ring"] = "ring",
         algorithm: Literal["ta", "gq"] = "gq",
-        offset: State | None = None,
-    ) -> Sensitivity:
+        include_chip_heights: bool = True,
+        ) -> Sensitivity:
         """Compute the Zernike wavefront sensitivity matrix via finite differences.
 
         For each DOF in *steps*, perturbs the alignment state by the
@@ -611,28 +659,29 @@ class RaytracedOpticalModel:
             Maximum Noll index (default: 28).
         rings : int
             Quadrature rings for :meth:`zernikes` (default: 10).
+        reference : Literal["chief", "mean", "ring"]
+            Whether to compute Zernikes relative to the chief ray intersection,
+            the mean intersection of all unvignetted rays, or the mean of a
+            ring of (possibly vignetted) rays.
         algorithm : Literal["ta", "gq"]
             Algorithm to use for computing zernikes.  "ta" uses the
             transverse aberration approach, "gq" uses Gaussian quadrature.
-        offset : State or None
-            Nominal (unperturbed) alignment state.  Defaults to zeros.
+        include_chip_heights : bool
+            Whether to include the effect of CCD chip height variations in the
+            spot diagrams used for Zernike computation.
 
         Returns
         -------
         Sensitivity[Zernikes]
             Gradient shape ``(ndof, nfield, jmax+1)``.
         """
-        if offset is None:
-            offset = State(
-                value=np.zeros(50, dtype=np.float64),
-                basis="f",
-            )
         nominal = self.zernikes(
             field=field,
-            state=offset,
             jmax=jmax,
             rings=rings,
             algorithm=algorithm,
+            reference=reference,
+            include_chip_heights=include_chip_heights,
         )
 
         perturbed = []
@@ -649,10 +698,12 @@ class RaytracedOpticalModel:
             perturbed.append(
                 self.zernikes(
                     field=field,
-                    state=offset + dstate,
+                    state=dstate,
                     jmax=jmax,
                     rings=rings,
+                    reference=reference,
                     algorithm=algorithm,
+                    include_chip_heights=include_chip_heights,
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)
@@ -662,8 +713,7 @@ class RaytracedOpticalModel:
         field: FieldCoords,
         steps: State,
         nrad: int = 10,
-        offset: State | None = None,
-        reference: Literal["chief", "mean", "ring"] = "chief",
+        reference: Literal["chief", "mean", "ring"] = "ring",
     ) -> Sensitivity:
         """Compute the spot-diagram sensitivity matrix via finite differences.
 
@@ -678,9 +728,7 @@ class RaytracedOpticalModel:
             Per-DOF step sizes.
         nrad : int
             Pupil sampling rings for :meth:`spots` (default: 10).
-        offset : State or None
-            Nominal alignment state.  Defaults to zeros.
-        reference: Literal["chief", "mean", "ring"] = "chief"
+        reference: Literal["chief", "mean", "ring"] = "ring"
             Whether to center spot diagrams on the chief ray intersection,
             the mean intersection of all unvignetted rays, or the mean of a
             ring of (possibly vignetted) rays.
@@ -690,14 +738,8 @@ class RaytracedOpticalModel:
         Sensitivity[Spots]
             Gradient shape ``(ndof, nfield, nray)`` for ``dx`` and ``dy``.
         """
-        if offset is None:
-            offset = State(
-                value=np.zeros(50, dtype=np.float64),
-                basis="f",
-            )
         nominal = self.spots(
             field=field,
-            state=offset,
             nrad=nrad,
             reference=reference,
         )
@@ -713,12 +755,41 @@ class RaytracedOpticalModel:
             perturbed.append(
                 self.spots(
                     field=field,
-                    state=offset + dstate,
+                    state=dstate,
                     nrad=nrad,
                     reference=reference,
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)
+
+    def double_zernikes(
+        self,
+        kmax: int = 28,
+        field_outer=None,
+        field_inner=None,
+        **kwargs,
+    ):
+        """Compute the double-Zernike basis functions.
+
+        Parameters
+        ----------
+        kmax : int
+            Maximum field Noll index for the double-Zernike fit (default: 28).
+        field_outer : Quantity
+            Outer field radius for the field-Zernike basis.  Required.
+        field_inner : Quantity or None
+            Inner field radius.  Defaults to zero.
+        **kwargs
+            Extra keyword arguments forwarded to :meth:`zernikes`.
+
+        Returns
+        -------
+        DoubleZernikes
+            Coefficients in units of microns (OCS frame).
+            Shape ``(kmax+1, jmax+1)``.
+        """
+        zk = self.zernikes(**kwargs)
+        return zk.double(kmax, field_outer, field_inner)
 
     def double_zernikes_sensitivity(
         self,
@@ -729,7 +800,6 @@ class RaytracedOpticalModel:
         field_inner=None,
         jmax: int = 28,
         rings: int = 10,
-        offset: State | None = None,
     ) -> Sensitivity:
         """Compute the double-Zernike sensitivity matrix via finite differences.
 
@@ -753,8 +823,6 @@ class RaytracedOpticalModel:
             Maximum pupil Noll index (default: 28).
         rings : int
             Quadrature rings for the underlying :meth:`zernikes` call.
-        offset : State or None
-            Nominal alignment state.  Defaults to zeros.
 
         Returns
         -------
@@ -766,7 +834,6 @@ class RaytracedOpticalModel:
             steps=steps,
             jmax=jmax,
             rings=rings,
-            offset=offset,
         )
         dz_nominal = zk_sens.nominal.double(kmax, field_outer, field_inner)
         dz_gradient = zk_sens.gradient.double(kmax, field_outer, field_inner)
