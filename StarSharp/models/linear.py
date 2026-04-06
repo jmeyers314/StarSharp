@@ -14,13 +14,14 @@ from ..datatypes import FieldCoords, Sensitivity, State, Zernikes, Spots
 from .raytraced import RaytracedOpticalModel
 
 
-class LinearSpotModel:
+class LinearModel:
     def __init__(
         self,
         raytraced: RaytracedOpticalModel,
         field: FieldCoords,
         use_dof: str | int | None = None,
         spots_kwargs: dict | None = None,
+        zernikes_kwargs: dict | None = None,
     ):
         self.raytraced = raytraced
         self.field = field
@@ -40,8 +41,9 @@ class LinearSpotModel:
 
         self.use_dof = use_dof
         self.spots_kwargs = spots_kwargs or {}
+        self.zernikes_kwargs = zernikes_kwargs or {}
         self._spots_sensitivity = None
-
+        self._zernikes_sensitivity = None
 
     def spots(
         self,
@@ -64,3 +66,25 @@ class LinearSpotModel:
             )
 
         return self._spots_sensitivity.predict(state)
+
+    def zernikes(
+        self,
+        state: State,
+    ) -> Zernikes:
+        if self._zernikes_sensitivity is None:
+            # Build a _full_ sensitivity map
+            steps = self.raytraced.steps
+            steps = State(
+                value=steps[self.use_dof],
+                basis="x",
+                use_dof=self.use_dof,
+                n_dof=50
+            )
+
+            self._zernikes_sensitivity = self.raytraced.zernikes_sensitivity(
+                field=self.field,
+                steps=steps,
+                **self.zernikes_kwargs
+            )
+
+        return self._zernikes_sensitivity.predict(state)

@@ -11,7 +11,7 @@ from .datatypes import (
     StateFactory,
     Zernikes,
 )
-from .models import LinearSpotModel, RaytracedOpticalModel
+from .models import LinearModel, RaytracedOpticalModel
 from .solver import ZernikeSolver
 
 __all__ = [
@@ -27,6 +27,6 @@ __all__ = [
     "Moments4",
     "Sensitivity",
     "ZernikeSolver",
-    "LinearSpotModel",
+    "LinearModel",
     "RaytracedOpticalModel",
 ]
