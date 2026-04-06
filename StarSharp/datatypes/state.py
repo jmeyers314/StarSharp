@@ -162,6 +162,11 @@ class State:
             n_dof=self.n_dof
         )
 
+    def __mul__(self, scalar):
+        if not np.isscalar(scalar):
+            return NotImplemented
+        return replace(self, value=self.value * scalar)
+
 
 def _sensitivity_to_matrix(sens) -> np.ndarray:
     """Extract a ``(n_obs, n_dof)`` design matrix from a ``Sensitivity``.
