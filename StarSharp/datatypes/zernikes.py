@@ -49,6 +49,8 @@ class Zernikes:
 
     def __post_init__(self):
         object.__setattr__(self, "coefs", np.atleast_2d(self.coefs))
+        frame = self.frame.lower()
+        object.__setattr__(self, "frame", frame)
         if (
             self.rtp is not None
             and self.field.rtp is not None
