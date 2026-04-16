@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+from functools import cache
+
 import astropy.units as u
 import galsim
 import numpy as np
 from astropy.coordinates import Angle
 
 from StarSharp.datatypes import FieldCoords, Spots
+from lsst.afw.cameraGeom import Camera
 
 RTP = Angle(0.25, unit=u.rad)
+
+
+@cache
+def _load_camera() -> Camera:
+    from lsst.obs.lsst import LsstCam
+    return LsstCam().getCamera()
 
 
 def _make_wcs(rtp: Angle | None = None) -> galsim.BaseWCS:
@@ -29,12 +38,12 @@ def _make_field(
     frame: str = "ocs",
     rtp: Angle | None = None,
     unit: u.Unit = u.deg,
-    wcs: galsim.BaseWCS | None = None,
+    camera: Camera | None = None,
 ) -> FieldCoords:
     rng = np.random.default_rng(42)
     x = rng.uniform(-1.5, 1.5, n) * unit
     y = rng.uniform(-1.5, 1.5, n) * unit
-    return FieldCoords(x=x, y=y, frame=frame, rtp=rtp, wcs=wcs)
+    return FieldCoords(x=x, y=y, frame=frame, rtp=rtp, camera=camera)
 
 
 def _make_spots(
@@ -43,13 +52,13 @@ def _make_spots(
     frame: str = "ccs",
     rtp: Angle | None = None,
     unit: u.Unit = u.um,
-    wcs: galsim.BaseWCS | None = None,
+    camera: Camera | None = None,
 ) -> Spots:
     rng = np.random.default_rng(12)
     dx = rng.normal(size=(n_field, n_ray)) * unit
     dy = rng.normal(size=(n_field, n_ray)) * unit
     vig = np.zeros((n_field, n_ray), dtype=bool)
-    field = _make_field(n_field, frame="ocs", rtp=rtp, wcs=wcs)
+    field = _make_field(n_field, frame="ocs", rtp=rtp, camera=camera)
     return Spots(
         dx=dx,
         dy=dy,
@@ -58,7 +67,7 @@ def _make_spots(
         wavelength=622.0 * u.nm,
         frame=frame,
         rtp=rtp,
-        wcs=wcs,
+        camera=camera,
     )
 
 

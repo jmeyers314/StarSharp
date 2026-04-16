@@ -3,15 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import astropy.units as u
-import batoid
-import galsim
 import numpy as np
 from astropy.coordinates import Angle
 from astropy.units import Quantity
-from batoid_rubin import LSSTBuilder
-from galsim.fitswcs import FittedSIPWCS
-from galsim.wcs import BaseWCS, CelestialWCS
-from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
+from lsst.afw.cameraGeom import FOCAL_PLANE, FIELD_ANGLE, Camera
 from numpy.typing import NDArray
 
 
@@ -30,12 +25,9 @@ class FieldCoords:
         ``'dvcs'`` (detector), or ``'edcs'`` (engineering).
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
-    wcs : BaseWCS or None
-        WCS for converting between field-angle and focal-plane space.  Required for
-        space conversions.  WCS assumes field angles are in radians in OCS and
-        focal-plane coordinates are in mm in CCS.
     camera : Camera or None
-        Camera geometry for determining detector numbers.  Required for
+        Camera geometry for conversions between field angle and focal plane
+        and for determining detector numbers.  Required for
         ``detnum`` property.
     """
 
@@ -45,7 +37,6 @@ class FieldCoords:
     y: Quantity
     frame: str = "ocs"
     rtp: Angle | None = None
-    wcs: BaseWCS | None = None
     camera: Camera | None = None
 
     def __post_init__(self):
@@ -84,47 +75,6 @@ class FieldCoords:
             )
         return val
 
-    @classmethod
-    def _build_wcs(
-        cls,
-        builder: LSSTBuilder,
-        rtp: Angle,
-        wavelength: Quantity,
-    ) -> BaseWCS:
-        rotated = builder.with_rtp(rtp).build()
-        nrad = 20
-        th_u, th_v = batoid.utils.hexapolar(
-            np.deg2rad(2.0), nrad=nrad, naz=int(2 * np.pi * nrad)
-        )
-        rays = batoid.RayVector.fromFieldAngles(
-            theta_x=th_u,
-            theta_y=th_v,
-            projection="gnomonic",
-            optic=rotated,
-            wavelength=wavelength.to_value(u.m),
-        )
-        rotated.trace(rays)
-        wcs = galsim.FittedSIPWCS(
-            rays.x * 1000, rays.y * 1000, th_u, th_v, order=3
-        )  # Use mm <-> radians
-        return wcs
-
-    @classmethod
-    def from_builder(
-        cls,
-        x: Quantity,
-        y: Quantity,
-        *,
-        builder: LSSTBuilder,
-        wavelength: Quantity,
-        rtp: Angle | None = None,
-        **kwargs,
-    ) -> FieldCoords:
-        if rtp is None:
-            rtp = Angle("0 deg")
-        wcs = cls._build_wcs(builder, rtp, wavelength)
-        return cls(x, y, rtp=rtp, wcs=wcs, **kwargs)
-
     @property
     def space(self) -> str:
         """Inferred coordinate space: ``'angle'`` or ``'focal_plane'``."""
@@ -148,7 +98,7 @@ class FieldCoords:
 
     @property
     def ccs(self) -> FieldCoords:
-        """This coordinate in the CCS frame (always frame='ccs')."""
+        """This coordinate in the CCS frame."""
         if self.frame == "ccs":
             return self
         if self.frame == "ocs":
@@ -189,46 +139,42 @@ class FieldCoords:
     @property
     def focal_plane(self) -> FieldCoords:
         """This coordinate in focal-plane space."""
+        # We will do all space conversions via the dvcs frame,
+        # which is where they're defined in data management.
         if self.space == "focal_plane":
             return self
-        wcs = self._require("wcs")
-        field = self.ocs
-        orig_shape = field.x.shape
-        fx = field.x.to_value(u.radian).ravel()
-        fy = field.y.to_value(u.radian).ravel()
-        args = [fx, fy]
-        kwargs = {}
-        if isinstance(wcs, CelestialWCS):
-            kwargs["units"] = "radians"
-        fpx, fpy = wcs.toImage(*args, **kwargs)
-        fpx = fpx.reshape(orig_shape)
-        fpy = fpy.reshape(orig_shape)
-        fp_ccs = replace(self, x=fpx << u.mm, y=fpy << u.mm, frame="ccs")
-        return getattr(fp_ccs, self.frame)
+        field = self.dvcs
+        field_arr = np.array([
+            field.x.to_value(u.radian),
+            field.y.to_value(u.radian),
+        ])
+        camera = self._require("camera")
+        transform = camera.getTransform(FIELD_ANGLE, FOCAL_PLANE).getMapping()
+        fp_arr = transform.applyForward(field_arr)
+        fp_x = fp_arr[0] << u.mm
+        fp_y = fp_arr[1] << u.mm
+        fp_dvcs = replace(self, x=fp_x, y=fp_y, frame="dvcs")
+        return getattr(fp_dvcs, self.frame)
 
     @property
     def angle(self) -> FieldCoords:
         """This coordinate in field-angle space (OCS frame)."""
         if self.space == "angle":
             return self
-        wcs = self._require("wcs")
-        fp = self.ccs
-        orig_shape = fp.x.shape
-        fpx = fp.x.to_value(u.mm).ravel()
-        fpy = fp.y.to_value(u.mm).ravel()
-        args = [fpx, fpy]
-        kwargs = {}
-        if isinstance(wcs, CelestialWCS):
-            kwargs["units"] = "radians"
-        fx, fy = wcs.toWorld(*args, **kwargs)
-        # Really need to move away from CelestialWCS, but for now can just wrap
-        # towards 0
-        fx[fx > np.pi] -= 2 * np.pi
-        fy[fy > np.pi] -= 2 * np.pi
-        fx = fx.reshape(orig_shape)
-        fy = fy.reshape(orig_shape)
-        field_ocs = replace(self, x=fx << u.radian, y=fy << u.radian, frame="ocs")
-        return getattr(field_ocs, self.frame)
+        # We will do all space conversions via the dvcs frame,
+        # which is where they're defined in data management.
+        fp = self.dvcs
+        fp_arr = np.array([
+            fp.x.to_value(u.mm),
+            fp.y.to_value(u.mm),
+        ])
+        camera = self._require("camera")
+        transform = camera.getTransform(FOCAL_PLANE, FIELD_ANGLE).getMapping()
+        field_arr = transform.applyForward(fp_arr)
+        field_x = field_arr[0] << u.radian
+        field_y = field_arr[1] << u.radian
+        field_dvcs = replace(self, x=field_x, y=field_y, frame="dvcs")
+        return getattr(field_dvcs, self.frame)
 
     @property
     def detnum(self) -> int | NDArray[np.integer]:
