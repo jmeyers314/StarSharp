@@ -3,14 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import astropy.units as u
-import galsim
 import numpy as np
 from astropy.coordinates import Angle
 from astropy.units import Quantity
-from galsim.wcs import BaseWCS, CelestialWCS
 from numpy.typing import NDArray
 
 from .field_coords import FieldCoords
+from lsst.afw.cameraGeom import Camera, FIELD_ANGLE, FOCAL_PLANE
 
 
 @dataclass(frozen=True)
@@ -51,7 +50,7 @@ class Spots:
     wavelength: Quantity | None = None
     frame: str = "ccs"
     rtp: Angle | None = None
-    wcs: BaseWCS | None = None
+    camera: Camera | None = None
     px: Quantity | None = None
     py: Quantity | None = None
 
@@ -168,63 +167,77 @@ class Spots:
         """This spot in focal-plane space."""
         if self.space == "focal_plane":
             return self
-        wcs = self._require("wcs")
-        fx = self.field.angle.ocs.x.to_value(u.radian)  # (..., nfield)
-        fy = self.field.angle.ocs.y.to_value(u.radian)
-        sfx = self.ocs.dx.to_value(u.radian) + fx[..., np.newaxis]
-        sfy = self.ocs.dy.to_value(u.radian) + fy[..., np.newaxis]
-        orig_shape = sfx.shape
-        args = [sfx.ravel(), sfy.ravel()]
-        if isinstance(wcs, CelestialWCS):
-            args.append("radians")
-        sfpx, sfpy = wcs.toImage(*args)
+        # Work in DVCS where camera transforms are defined
+        camera = self._require("camera")
+        transform = camera.getTransform(FIELD_ANGLE, FOCAL_PLANE).getMapping()
+
+        # spot angle centers
+        fax = self.field.angle.dvcs.x.to_value(u.radian)
+        fay = self.field.angle.dvcs.y.to_value(u.radian)
+
+        # spot absolute angle positions
+        sfax = self.dvcs.dx.to_value(u.radian) + fax[..., np.newaxis]
+        sfay = self.dvcs.dy.to_value(u.radian) + fay[..., np.newaxis]
+
+        # spot absolute focal plane positions
+        orig_shape = sfax.shape
+        sfa = np.array([sfax.ravel(), sfay.ravel()])
+        sfpx, sfpy = transform.applyForward(sfa)
         sfpx = sfpx.reshape(orig_shape)
         sfpy = sfpy.reshape(orig_shape)
-        cfx = self.field.focal_plane.ccs.x.to_value(u.mm)  # (..., nfield)
-        cfy = self.field.focal_plane.ccs.y.to_value(u.mm)
-        sfpx -= cfx[..., np.newaxis]
-        sfpy -= cfy[..., np.newaxis]
 
-        fp_ccs = replace(
+        # spot focal plane centers
+        fp = self.field.focal_plane.dvcs
+
+        # spot focal plane offsets from center
+        sfpx -= fp.x.to_value(u.mm)[..., np.newaxis]
+        sfpy -= fp.y.to_value(u.mm)[..., np.newaxis]
+
+        fp_dvcs = replace(
             self,
             dx=sfpx << u.mm,
             dy=sfpy << u.mm,
-            field=self.field.focal_plane,
-            frame="ccs",
+            field=fp,
+            frame="dvcs",
         )
-        return getattr(fp_ccs, self.frame)
+        return getattr(fp_dvcs, self.frame)
 
     @property
     def angle(self) -> Spots:
         """This spot in field-angle space (OCS frame)."""
         if self.space == "angle":
             return self
-        wcs = self._require("wcs")
-        cfpx = self.field.focal_plane.ccs.x.to_value(u.mm)  # (..., nfield)
-        cfpy = self.field.focal_plane.ccs.y.to_value(u.mm)
-        sfpx = self.ccs.dx.to_value(u.mm) + cfpx[..., np.newaxis]
-        sfpy = self.ccs.dy.to_value(u.mm) + cfpy[..., np.newaxis]
+        # Work in DVCS where camera transforms are defined
+        camera = self._require("camera")
+        transform = camera.getTransform(FOCAL_PLANE, FIELD_ANGLE).getMapping()
+
+        # spot focal plane centers
+        fp = self.field.focal_plane.dvcs
+
+        # spot absolute focal plane positions
+        sfpx = self.dvcs.dx.to_value(u.mm) + fp.x.to_value(u.mm)[..., np.newaxis]
+        sfpy = self.dvcs.dy.to_value(u.mm) + fp.y.to_value(u.mm)[..., np.newaxis]
+
+        # spot absolute angle positions
         orig_shape = sfpx.shape
-        args = [sfpx.ravel(), sfpy.ravel()]
-        if isinstance(wcs, CelestialWCS):
-            args.append("radians")
+        sfp = np.array([sfpx.ravel(), sfpy.ravel()])
+        sfax, sfay = transform.applyForward(sfp)
+        sfax = sfax.reshape(orig_shape)
+        sfay = sfay.reshape(orig_shape)
 
-        sfx, sfy = wcs.toWorld(*args)
-        sfx = sfx.reshape(orig_shape)
-        sfy = sfy.reshape(orig_shape)
-        fax = self.field.angle.ocs.x.to_value(u.radian)  # (..., nfield)
-        fay = self.field.angle.ocs.y.to_value(u.radian)
-        sfx -= fax[..., np.newaxis]
-        sfy -= fay[..., np.newaxis]
-
-        field_ocs = replace(
+        # spot angle centers
+        fax = self.field.angle.dvcs.x.to_value(u.radian)
+        fay = self.field.angle.dvcs.y.to_value(u.radian)
+        sfax -= fax[..., np.newaxis]
+        sfay -= fay[..., np.newaxis]
+        angle_dvcs = replace(
             self,
-            dx=sfx << u.radian,
-            dy=sfy << u.radian,
-            field=self.field.angle.ocs,
-            frame="ocs",
+            dx=sfax << u.radian,
+            dy=sfay << u.radian,
+            field=self.field.angle.dvcs,
+            frame="dvcs",
         )
-        return getattr(field_ocs, self.frame)
+        return getattr(angle_dvcs, self.frame)
 
     def __repr__(self) -> str:
         return f"Spots(frame={self.frame!r})"

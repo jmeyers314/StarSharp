@@ -13,11 +13,11 @@ from StarSharp.datatypes import FieldCoords, Moments, Spots
 
 from .utils import (
     RTP,
+    _load_camera,
     _make_field,
     _make_spots,
     _make_spots_batched,
     _make_spots_single,
-    _make_wcs,
 )
 
 
@@ -121,8 +121,8 @@ class TestSpotsSpace:
         assert sp.space == "focal_plane"
 
     def test_roundtrip_focal_plane_angle(self):
-        wcs = _make_wcs(rtp=RTP)
-        sp = _make_spots(frame="ccs", rtp=RTP, unit=u.mm, wcs=wcs)
+        camera = _load_camera()
+        sp = _make_spots(frame="ccs", rtp=RTP, unit=u.mm, camera=camera)
         rt = sp.angle.focal_plane
         np.testing.assert_allclose(
             rt.dx.to_value(u.mm), sp.dx.to_value(u.mm), atol=1e-12
@@ -132,14 +132,102 @@ class TestSpotsSpace:
         )
 
     def test_roundtrip_angle_focal_plane(self):
-        wcs = _make_wcs(rtp=RTP)
-        sp = _make_spots(frame="ocs", rtp=RTP, unit=u.arcsec, wcs=wcs)
+        camera = _load_camera()
+        sp = _make_spots(frame="ocs", rtp=RTP, unit=u.arcsec, camera=camera)
         rt = sp.focal_plane.angle
         np.testing.assert_allclose(
             rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-12
         )
         np.testing.assert_allclose(
             rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-12
+        )
+
+
+class TestSpotsMultiStepRoundtrip:
+    """Multi-step roundtrips mixing frame and angle/focal-plane conversions."""
+
+    def test_ccs_angle_to_dvcs_fp_to_ccs_angle(self):
+        # CCS angle -> DVCS fp -> CCS angle
+        camera = _load_camera()
+        sp = _make_spots(frame="ccs", rtp=RTP, unit=u.arcsec, camera=camera)
+        rt = sp.dvcs.focal_plane.ccs.angle
+        assert rt.frame == "ccs"
+        assert rt.space == "angle"
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
+        )
+
+    def test_ocs_angle_to_ccs_fp_to_dvcs_angle_to_ocs(self):
+        # OCS angle -> CCS fp -> DVCS angle -> OCS angle
+        camera = _load_camera()
+        sp = _make_spots(frame="ocs", rtp=RTP, unit=u.arcsec, camera=camera)
+        rt = sp.ccs.focal_plane.dvcs.angle.ocs
+        assert rt.frame == "ocs"
+        assert rt.space == "angle"
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
+        )
+
+    def test_ccs_fp_to_ocs_angle_to_edcs_fp(self):
+        # CCS fp -> OCS angle -> EDCS fp -> CCS fp
+        camera = _load_camera()
+        sp = _make_spots(frame="ccs", rtp=RTP, unit=u.mm, camera=camera)
+        rt = sp.angle.ocs.edcs.focal_plane.ccs
+        assert rt.frame == "ccs"
+        assert rt.space == "focal_plane"
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.mm), sp.dx.to_value(u.mm), atol=1e-10
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.mm), sp.dy.to_value(u.mm), atol=1e-10
+        )
+
+    def test_dvcs_angle_through_all_frames_and_spaces(self):
+        # DVCS angle -> CCS fp -> OCS angle -> DVCS angle
+        camera = _load_camera()
+        sp = _make_spots(frame="dvcs", rtp=RTP, unit=u.arcsec, camera=camera)
+        rt = sp.ccs.focal_plane.ocs.angle.dvcs
+        assert rt.frame == "dvcs"
+        assert rt.space == "angle"
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
+        )
+
+    def test_double_space_roundtrip_with_frame_hops(self):
+        # OCS angle -> DVCS fp -> CCS angle -> OCS fp -> DVCS angle -> OCS angle
+        camera = _load_camera()
+        sp = _make_spots(frame="ocs", rtp=RTP, unit=u.arcsec, camera=camera)
+        rt = sp.dvcs.focal_plane.ccs.angle.ocs.focal_plane.dvcs.angle.ocs
+        assert rt.frame == "ocs"
+        assert rt.space == "angle"
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
+        )
+
+    def test_fp_to_angle_frame_hop_back_to_fp(self):
+        # CCS fp -> DVCS angle -> OCS fp -> CCS fp
+        camera = _load_camera()
+        sp = _make_spots(frame="ccs", rtp=RTP, unit=u.mm, camera=camera)
+        rt = sp.dvcs.angle.ocs.focal_plane.ccs
+        assert rt.frame == "ccs"
+        assert rt.space == "focal_plane"
+        np.testing.assert_allclose(
+            rt.dx.to_value(u.mm), sp.dx.to_value(u.mm), atol=1e-10
+        )
+        np.testing.assert_allclose(
+            rt.dy.to_value(u.mm), sp.dy.to_value(u.mm), atol=1e-10
         )
 
 
@@ -216,13 +304,13 @@ class TestSpotsPupilCoords:
         np.testing.assert_array_equal(rotated.py, sp.py)
 
     def test_preserved_on_space_conversion(self):
-        wcs = _make_wcs(rtp=RTP)
+        camera = _load_camera()
         rng = np.random.default_rng(12)
         n_field, n_ray = 3, 50
         dx = rng.normal(size=(n_field, n_ray)) * u.um
         dy = rng.normal(size=(n_field, n_ray)) * u.um
         vig = np.zeros((n_field, n_ray), dtype=bool)
-        field = _make_field(n_field, rtp=RTP, wcs=wcs)
+        field = _make_field(n_field, rtp=RTP, camera=camera)
         px = np.linspace(-4.0, 4.0, n_ray) * u.m
         py = np.linspace(-4.0, 4.0, n_ray) * u.m
         sp = Spots(
@@ -232,7 +320,7 @@ class TestSpotsPupilCoords:
             field=field,
             frame="ccs",
             rtp=RTP,
-            wcs=wcs,
+            camera=camera,
             px=px,
             py=py,
         )
