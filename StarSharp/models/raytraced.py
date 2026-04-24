@@ -8,7 +8,7 @@ from astropy.coordinates import Angle
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
 from numpy.typing import NDArray
-from tqdm import tqdm
+from tqdm.std import tqdm as TqdmType
 
 from ..datatypes import DoubleZernikes, FieldCoords, Sensitivity, Spots, State, Zernikes
 
@@ -42,9 +42,6 @@ class RaytracedOpticalModel:
         :meth:`spots`).
     offset : State or None
         Optional fixed offset applied to the AOS DOFs before ray tracing.
-    tqdm : callable or None
-        Progress-bar factory (e.g. ``tqdm.tqdm``).  When provided, a bar
-        is shown during long ray-tracing loops.
     """
 
     def __init__(
@@ -54,7 +51,6 @@ class RaytracedOpticalModel:
         wavelength: float,
         camera: Camera | None = None,
         offset: State | None = None,
-        tqdm: tqdm | None = None,
     ):
         self.builder = builder
         self.rtp = rtp
@@ -67,7 +63,6 @@ class RaytracedOpticalModel:
                 basis="f",
             )
         self.offset = offset
-        self.tqdm = tqdm
 
         # Living a little dangerously here by assuming the builder's use_m1m3_modes and
         # use_m2_modes are enough to indicate "standard" dofs and thus step sizes.
@@ -290,16 +285,11 @@ class RaytracedOpticalModel:
         fpx = np.full(total, np.nan)
         fpy = np.full(total, np.nan)
 
-        bar = (
-            self.tqdm(desc="Raytracing", total=total) if self.tqdm is not None else None
-        )
         for ifield, (thx, thy, detnum, zk_coef) in enumerate(zip(x_flat, y_flat, detnum_flat, zk_coefs_flat)):
             if zk_coef is not None:
                 this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
             else:
                 this_builder = builder
-            if bar:
-                bar.update(1)
             if detnum == -1:
                 continue
             if include_chip_heights:
@@ -466,17 +456,12 @@ class RaytracedOpticalModel:
         else:
             zk_coefs_flat = [None] * total
 
-        bar = (
-            self.tqdm(desc="Raytracing", total=total) if self.tqdm is not None else None
-        )
         zk_out = []
         for thx, thy, detnum, zk_coef in zip(x_flat, y_flat, detnum_flat, zk_coefs_flat):
             if zk_coef is not None:
                 this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
             else:
                 this_builder = builder
-            if bar:
-                bar.update(1)
             if detnum == -1:
                 zk_out.append(np.full(jmax + 1, np.nan))
                 continue
@@ -641,7 +626,8 @@ class RaytracedOpticalModel:
         reference: Literal["chief", "mean", "ring"] = "ring",
         algorithm: Literal["ta", "gq"] = "gq",
         include_chip_heights: bool = True,
-        ) -> Sensitivity:
+        tqdm: type[TqdmType] | None = None,
+    ) -> Sensitivity:
         """Compute the Zernike wavefront sensitivity matrix via finite differences.
 
         For each DOF in *steps*, perturbs the alignment state by the
@@ -670,6 +656,8 @@ class RaytracedOpticalModel:
             Whether to include the effect of CCD chip height variations in the
             spot diagrams used for Zernike computation.
 
+        tqdm : tqdm | None
+            Optional tqdm progress bar.
         Returns
         -------
         Sensitivity[Zernikes]
@@ -682,10 +670,15 @@ class RaytracedOpticalModel:
             algorithm=algorithm,
             reference=reference,
             include_chip_heights=include_chip_heights,
+            focus=focus,
         )
 
         perturbed = []
-        for i, step in enumerate(steps.value):
+        if tqdm is not None:
+            iterator = tqdm(enumerate(steps.value), total=len(steps.value), desc="Computing Zernike sensitivities")
+        else:
+            iterator = enumerate(steps.value)
+        for i, step in iterator:
             dval = np.zeros_like(steps.value)
             dval[i] = step
             dstate = State(
@@ -714,6 +707,7 @@ class RaytracedOpticalModel:
         steps: State,
         nrad: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
+        tqdm: type[TqdmType] | None = None,
     ) -> Sensitivity:
         """Compute the spot-diagram sensitivity matrix via finite differences.
 
@@ -732,6 +726,8 @@ class RaytracedOpticalModel:
             Whether to center spot diagrams on the chief ray intersection,
             the mean intersection of all unvignetted rays, or the mean of a
             ring of (possibly vignetted) rays.
+        tqdm : tqdm | None
+            Optional tqdm progress bar.
 
         Returns
         -------
@@ -745,7 +741,11 @@ class RaytracedOpticalModel:
         )
 
         perturbed = []
-        for i, step in enumerate(steps.value):
+        if tqdm is not None:
+            iterator = tqdm(enumerate(steps.value), total=len(steps.value), desc="Computing Spot sensitivities")
+        else:
+            iterator = enumerate(steps.value)
+        for i, step in iterator:
             dval = np.zeros_like(steps.value)
             dval[i] = step
             dstate = replace(
@@ -800,6 +800,7 @@ class RaytracedOpticalModel:
         field_inner=None,
         jmax: int = 28,
         rings: int = 10,
+        tqdm: type[TqdmType] | None = None,
     ) -> Sensitivity:
         """Compute the double-Zernike sensitivity matrix via finite differences.
 
@@ -823,6 +824,8 @@ class RaytracedOpticalModel:
             Maximum pupil Noll index (default: 28).
         rings : int
             Quadrature rings for the underlying :meth:`zernikes` call.
+        tqdm : tqdm | None
+            Optional tqdm progress bar forwarded to :meth:`zernikes_sensitivity`.
 
         Returns
         -------
@@ -834,6 +837,7 @@ class RaytracedOpticalModel:
             steps=steps,
             jmax=jmax,
             rings=rings,
+            tqdm=tqdm,
         )
         dz_nominal = zk_sens.nominal.double(kmax, field_outer, field_inner)
         dz_gradient = zk_sens.gradient.double(kmax, field_outer, field_inner)
