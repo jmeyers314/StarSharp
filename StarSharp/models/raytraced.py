@@ -15,6 +15,8 @@ from ..datatypes import DoubleZernikes, FieldCoords, Sensitivity, Spots, State, 
 
 PUPIL_OUTER = 4.18
 PUPIL_INNER = PUPIL_OUTER * 0.612
+EXTRA_FOCAL_DETS = [191, 195, 199, 203]
+INTRA_FOCAL_DETS = [192, 196, 200, 204]
 
 
 class RaytracedOpticalModel:
@@ -211,6 +213,78 @@ class RaytracedOpticalModel:
             camera=self.camera
         )
 
+    def _iter_thx_thy_telescope(
+        self,
+        field: FieldCoords,
+        state: State | None = None,
+        zk: Zernikes | DoubleZernikes | None = None,
+        include_chip_heights: bool = True,
+        camera_piston: Quantity = None,
+        detector_piston: Quantity = None,
+    ):
+        """Build and iterate over per-field telescopes for ray-tracing operations."""
+        field = field.angle.ocs
+        if not np.allclose(field.rtp, self.rtp):
+            raise ValueError(
+                f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})"
+            )
+        if isinstance(zk, DoubleZernikes):
+            zk = zk.single(field)
+
+        builder = self.builder.with_rtp(self.rtp)
+        if camera_piston is not None:
+            builder = builder.with_camera_piston(camera_piston.to_value(u.micron))
+        if state is not None:
+            builder = builder.with_aos_dof((state + self.offset).f.value)
+        else:
+            builder = builder.with_aos_dof(self.offset.f.value)
+
+        # Flatten batch dims so we iterate over every field point individually.
+        batch_shape = field.x.shape[:-1]
+        nfield = field.x.shape[-1]
+        total = int(np.prod(field.x.shape))
+        x_flat = field.x.reshape(total)
+        y_flat = field.y.reshape(total)
+        detnum_flat = field.detnum.reshape(total)
+
+        # Broadcast and flatten extra Zernike coefs to (total, jmax+1) in meters.
+        # None entries signal "no extra zk for this field point".
+        if zk is not None:
+            target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
+            zk_broad = np.broadcast_to(zk.coefs.to_value(u.m), target_shape)
+            zk_coefs_flat = zk_broad.reshape(total, -1)
+        else:
+            zk_coefs_flat = [None] * total
+
+        def iterator():
+            for ifield, (thx, thy, detnum, zk_coef) in enumerate(
+                zip(x_flat, y_flat, detnum_flat, zk_coefs_flat)
+            ):
+                this_builder = builder
+                if zk_coef is not None:
+                    this_builder = this_builder.with_extra_zk(
+                        zk_coef, PUPIL_INNER / PUPIL_OUTER
+                    )
+                if detector_piston is None:
+                    if detnum in INTRA_FOCAL_DETS:
+                        this_builder = this_builder.with_detector_piston(-1500)
+                    elif detnum in EXTRA_FOCAL_DETS:
+                        this_builder = this_builder.with_detector_piston(+1500)
+                else:
+                    this_builder = this_builder.with_detector_piston(
+                        detector_piston.to_value(u.micron)
+                    )
+                if include_chip_heights:
+                    if detnum == -1:
+                        yield ifield, thx, thy, None
+                        continue
+                    telescope = this_builder.build_det(detnum)
+                else:
+                    telescope = this_builder.build()
+                yield ifield, thx, thy, telescope
+
+        return field, batch_shape, nfield, total, iterator()
+
     def spots(
         self,
         field: FieldCoords,
@@ -220,6 +294,7 @@ class RaytracedOpticalModel:
         reference: Literal["chief", "mean", "ring"] = "ring",
         include_chip_heights: bool = True,
         camera_piston: Quantity = None,
+        detector_piston: Quantity = None,
     ) -> Spots:
         """Trace rays and return spot diagrams.
 
@@ -248,6 +323,11 @@ class RaytracedOpticalModel:
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
             spot diagrams.
+        camera_piston : Quantity or None
+            Optional extra piston term applied to the entire camera.
+        detector_piston : Quantity or None
+            Optional extra piston term applied to each detector independently.  If
+            None, then use the canonical piston for science/intra/extra detectors.
 
         Returns
         -------
@@ -255,13 +335,6 @@ class RaytracedOpticalModel:
             Spot diagrams in the CCS frame with focal-plane units (micron).
             Shape ``(*batch_shape, nfield, nray)``.
         """
-        field = field.angle.ocs
-        if not np.allclose(field.rtp, self.rtp):
-            raise ValueError(
-                f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})"
-            )
-        if isinstance(zk, DoubleZernikes):
-            zk = zk.single(field)
         # Pick an outer radius that is half a grid step smaller than the outer pupil
         # And inner radius that is half a grid step larger than inner pupil.
         dr = (PUPIL_OUTER - PUPIL_INNER) / (nrad + 1)
@@ -272,28 +345,14 @@ class RaytracedOpticalModel:
             naz=int(2 * np.pi * nrad / (1 - PUPIL_INNER / PUPIL_OUTER)),
         )
 
-        builder = self.builder.with_rtp(self.rtp)
-        if state is not None:
-            builder = builder.with_aos_dof((state + self.offset).f.value)
-        else:
-            builder = builder.with_aos_dof(self.offset.f.value)
-        # Flatten batch dims so we iterate over every field point individually,
-        # then reshape outputs back to (*batch_shape, nfield, ...).
-        batch_shape = field.x.shape[:-1]
-        nfield = field.x.shape[-1]
-        total = int(np.prod(field.x.shape))
-        x_flat = field.x.reshape(total)
-        y_flat = field.y.reshape(total)
-        detnum_flat = field.detnum.reshape(total)
-
-        # Broadcast and flatten extra Zernike coefs to (total, jmax+1) in meters.
-        # None entries signal "no extra zk for this field point".
-        if zk is not None:
-            target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
-            zk_broad = np.broadcast_to(zk.coefs.to_value(u.m), target_shape)
-            zk_coefs_flat = zk_broad.reshape(total, -1)
-        else:
-            zk_coefs_flat = [None] * total
+        field, batch_shape, nfield, total, iterator = self._iter_thx_thy_telescope(
+            field=field,
+            state=state,
+            zk=zk,
+            include_chip_heights=include_chip_heights,
+            camera_piston=camera_piston,
+            detector_piston=detector_piston,
+        )
 
         nray = len(px)
         dx = np.full((total, nray), np.nan)
@@ -302,17 +361,9 @@ class RaytracedOpticalModel:
         fpx = np.full(total, np.nan)
         fpy = np.full(total, np.nan)
 
-        for ifield, (thx, thy, detnum, zk_coef) in enumerate(zip(x_flat, y_flat, detnum_flat, zk_coefs_flat)):
-            if zk_coef is not None:
-                this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
-            else:
-                this_builder = builder
-            if include_chip_heights:
-                if detnum == -1:
-                    continue
-                telescope = this_builder.build_det(detnum)
-            else:
-                telescope = this_builder.build()
+        for ifield, thx, thy, telescope in iterator:
+            if telescope is None:
+                continue
             rays = batoid.RayVector.fromStop(
                 np.array(px),
                 np.array(py),
@@ -397,6 +448,8 @@ class RaytracedOpticalModel:
         reference: Literal["chief", "mean", "ring"] = "ring",
         algorithm: Literal["ta", "gq"] = "gq",
         include_chip_heights: bool = True,
+        camera_piston: Quantity = None,
+        detector_piston: Quantity = None,
     ) -> Zernikes:
         """Compute Zernike wavefront coefficients.
 
@@ -430,6 +483,11 @@ class RaytracedOpticalModel:
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
             spot diagrams.
+        camera_piston : Quantity or None
+            Optional extra piston term applied to the entire camera.
+        detector_piston : Quantity or None
+            Optional extra piston term applied to each detector independently.  If
+            None, then use the canonical piston for science/intra/extra detectors.
 
         Returns
         -------
@@ -437,49 +495,20 @@ class RaytracedOpticalModel:
             Coefficients in units of microns (OCS frame).
             Shape ``(*batch_shape, nfield, jmax+1)``.
         """
-        field = field.angle.ocs
-        if not np.allclose(field.rtp, self.rtp):
-            raise ValueError(
-                f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})"
-            )
-        if isinstance(zk, DoubleZernikes):
-            zk = zk.single(field)
-        builder = self.builder.with_rtp(self.rtp)
-        if state is not None:
-            builder = builder.with_aos_dof((state + self.offset).f.value)
-        else:
-            builder = builder.with_aos_dof(self.offset.f.value)
-
-        # Flatten batch dims so we iterate over every field point individually,
-        # then reshape outputs back to (*batch_shape, nfield, jmax+1).
-        batch_shape = field.x.shape[:-1]
-        nfield = field.x.shape[-1]
-        total = int(np.prod(field.x.shape))
-        x_flat = field.x.reshape(total)
-        y_flat = field.y.reshape(total)
-        detnum_flat = field.detnum.reshape(total)
-
-        # Broadcast and flatten extra Zernike coefs to (total, jmax_zk+1) in meters.
-        if zk is not None:
-            target_shape = batch_shape + (nfield, zk.coefs.shape[-1])
-            zk_broad = np.broadcast_to(zk.coefs.to_value(u.m), target_shape)
-            zk_coefs_flat = zk_broad.reshape(total, -1)
-        else:
-            zk_coefs_flat = [None] * total
+        field, batch_shape, nfield, _, iterator = self._iter_thx_thy_telescope(
+            field=field,
+            state=state,
+            zk=zk,
+            include_chip_heights=include_chip_heights,
+            camera_piston=camera_piston,
+            detector_piston=detector_piston,
+        )
 
         zk_out = []
-        for thx, thy, detnum, zk_coef in zip(x_flat, y_flat, detnum_flat, zk_coefs_flat):
-            if zk_coef is not None:
-                this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
-            else:
-                this_builder = builder
-            if include_chip_heights:
-                if detnum == -1:
-                    zk_out.append(np.full(jmax + 1, np.nan))
-                    continue
-                telescope = this_builder.build_det(detnum)
-            else:
-                telescope = this_builder.build()
+        for _, thx, thy, telescope in iterator:
+            if telescope is None:
+                zk_out.append(np.full(jmax + 1, np.nan))
+                continue
             if algorithm == "gq":
                 try:
                     zk1 = batoid.zernikeGQ(
@@ -524,6 +553,35 @@ class RaytracedOpticalModel:
             frame="ocs",
             rtp=self.rtp,
         )
+
+    def double_zernikes(
+        self,
+        kmax: int,
+        field_outer: Quantity,
+        field_inner: Quantity = None,
+        **kwargs,
+    ):
+        """Compute the double-Zernike basis functions.
+
+        Parameters
+        ----------
+        kmax : int
+            Maximum field Noll index for the double-Zernike fit (default: 28).
+        field_outer : Quantity
+            Outer field radius for the field-Zernike basis.  Required.
+        field_inner : Quantity or None
+            Inner field radius.  Defaults to zero.
+        **kwargs
+            Extra keyword arguments forwarded to :meth:`zernikes`.
+
+        Returns
+        -------
+        DoubleZernikes
+            Coefficients in units of microns (OCS frame).
+            Shape ``(kmax+1, jmax+1)``.
+        """
+        zk = self.zernikes(**kwargs)
+        return zk.double(kmax, field_outer, field_inner)
 
     def _optimize_dx_func(
         self,
@@ -778,35 +836,6 @@ class RaytracedOpticalModel:
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)
-
-    def double_zernikes(
-        self,
-        kmax: int,
-        field_outer: Quantity,
-        field_inner: Quantity = None,
-        **kwargs,
-    ):
-        """Compute the double-Zernike basis functions.
-
-        Parameters
-        ----------
-        kmax : int
-            Maximum field Noll index for the double-Zernike fit (default: 28).
-        field_outer : Quantity
-            Outer field radius for the field-Zernike basis.  Required.
-        field_inner : Quantity or None
-            Inner field radius.  Defaults to zero.
-        **kwargs
-            Extra keyword arguments forwarded to :meth:`zernikes`.
-
-        Returns
-        -------
-        DoubleZernikes
-            Coefficients in units of microns (OCS frame).
-            Shape ``(kmax+1, jmax+1)``.
-        """
-        zk = self.zernikes(**kwargs)
-        return zk.double(kmax, field_outer, field_inner)
 
     def double_zernikes_sensitivity(
         self,
