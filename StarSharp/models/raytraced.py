@@ -185,7 +185,6 @@ class RaytracedOpticalModel:
         nrad: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
         include_chip_heights: bool = True,
-        focus="focal",
     ) -> Spots:
         """Trace rays and return spot diagrams.
 
@@ -214,9 +213,6 @@ class RaytracedOpticalModel:
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
             spot diagrams.
-        focus : {"intra", "extra", "focal"}
-            Whether to compute spots at the intra-focal plane, extra-focal
-            plane, or nominal focal plane.
 
         Returns
         -------
@@ -246,10 +242,6 @@ class RaytracedOpticalModel:
             builder = builder.with_aos_dof((state + self.offset).f.value)
         else:
             builder = builder.with_aos_dof(self.offset.f.value)
-        if focus == "intra":
-            builder = builder.with_intra()
-        elif focus == "extra":
-            builder = builder.with_extra()
         # Flatten batch dims so we iterate over every field point individually,
         # then reshape outputs back to (*batch_shape, nfield, ...).
         batch_shape = field.x.shape[:-1]
@@ -370,7 +362,6 @@ class RaytracedOpticalModel:
         reference: Literal["chief", "mean", "ring"] = "ring",
         algorithm: Literal["ta", "gq"] = "gq",
         include_chip_heights: bool = True,
-        focus="focal",
     ) -> Zernikes:
         """Compute Zernike wavefront coefficients.
 
@@ -404,9 +395,6 @@ class RaytracedOpticalModel:
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
             spot diagrams.
-        focus : {"intra", "extra", "focal"}
-            Whether to compute Zernikes at the intra-focal plane, extra-focal
-            plane, or nominal focal plane.
 
         Returns
         -------
@@ -426,10 +414,6 @@ class RaytracedOpticalModel:
             builder = builder.with_aos_dof((state + self.offset).f.value)
         else:
             builder = builder.with_aos_dof(self.offset.f.value)
-        if focus == "intra":
-            builder = builder.with_intra()
-        elif focus == "extra":
-            builder = builder.with_extra()
 
         # Flatten batch dims so we iterate over every field point individually,
         # then reshape outputs back to (*batch_shape, nfield, jmax+1).
@@ -649,7 +633,6 @@ class RaytracedOpticalModel:
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
             spot diagrams used for Zernike computation.
-
         tqdm : tqdm | None
             Optional tqdm progress bar.
         Returns
@@ -664,7 +647,6 @@ class RaytracedOpticalModel:
             algorithm=algorithm,
             reference=reference,
             include_chip_heights=include_chip_heights,
-            focus=focus,
         )
 
         perturbed = []
