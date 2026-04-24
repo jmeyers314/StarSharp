@@ -290,9 +290,9 @@ class RaytracedOpticalModel:
                 this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
             else:
                 this_builder = builder
-            if detnum == -1:
-                continue
             if include_chip_heights:
+                if detnum == -1:
+                    continue
                 telescope = this_builder.build_det(detnum)
             else:
                 telescope = this_builder.build()
@@ -462,10 +462,10 @@ class RaytracedOpticalModel:
                 this_builder = builder.with_extra_zk(zk_coef, PUPIL_INNER / PUPIL_OUTER)
             else:
                 this_builder = builder
-            if detnum == -1:
-                zk_out.append(np.full(jmax + 1, np.nan))
-                continue
             if include_chip_heights:
+                if detnum == -1:
+                    zk_out.append(np.full(jmax + 1, np.nan))
+                    continue
                 telescope = this_builder.build_det(detnum)
             else:
                 telescope = this_builder.build()
