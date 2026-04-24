@@ -5,6 +5,7 @@ import astropy.units as u
 import batoid
 import numpy as np
 from astropy.coordinates import Angle
+from astropy.units import Quantity
 from batoid_rubin import LSSTBuilder
 from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
 from numpy.typing import NDArray
@@ -48,7 +49,7 @@ class RaytracedOpticalModel:
         self,
         builder: LSSTBuilder,
         rtp: Angle,
-        wavelength: float,
+        wavelength: Quantity,
         camera: Camera | None = None,
         offset: State | None = None,
     ):
@@ -185,6 +186,7 @@ class RaytracedOpticalModel:
         nrad: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
         include_chip_heights: bool = True,
+        camera_piston: Quantity = None,
     ) -> Spots:
         """Trace rays and return spot diagrams.
 
@@ -492,7 +494,7 @@ class RaytracedOpticalModel:
 
     def _optimize_dx_func(
         self,
-        params: np.ndarray,
+        params: NDArray[np.float64],
         field: FieldCoords,
         nrad: int = 10,
         use_dof: NDArray[np.integer] | None = None,
@@ -517,7 +519,7 @@ class RaytracedOpticalModel:
 
     def _optimize_func(
         self,
-        params: np.ndarray,
+        params: NDArray[np.float64],
         field: FieldCoords,
         nrad: int = 10,
         use_dof: NDArray[np.integer] | None = None,
@@ -746,9 +748,9 @@ class RaytracedOpticalModel:
 
     def double_zernikes(
         self,
-        kmax: int = 28,
-        field_outer=None,
-        field_inner=None,
+        kmax: int,
+        field_outer: Quantity,
+        field_inner: Quantity = None,
         **kwargs,
     ):
         """Compute the double-Zernike basis functions.
@@ -775,9 +777,9 @@ class RaytracedOpticalModel:
 
     def double_zernikes_sensitivity(
         self,
-        kmax: int = 28,
-        field_outer=None,
-        field_inner=None,
+        kmax: int,
+        field_outer: Quantity,
+        field_inner: Quantity = None,
         tqdm: type[TqdmType] | None = None,
         **kwargs,
     ) -> Sensitivity:
