@@ -231,8 +231,8 @@ class RaytracedOpticalModel:
             )
         if isinstance(zk, DoubleZernikes):
             zk = zk.single(field)
-        # Pick an outer radius that is half a grid radius smaller than the outer pupil
-        # And similarly for the inner radius (but larger).
+        # Pick an outer radius that is half a grid step smaller than the outer pupil
+        # And inner radius that is half a grid step larger than inner pupil.
         dr = (PUPIL_OUTER - PUPIL_INNER) / (nrad + 1)
         px, py = batoid.utils.hexapolar(
             outer=PUPIL_OUTER - dr / 2,
@@ -250,7 +250,6 @@ class RaytracedOpticalModel:
             builder = builder.with_intra()
         elif focus == "extra":
             builder = builder.with_extra()
-
         # Flatten batch dims so we iterate over every field point individually,
         # then reshape outputs back to (*batch_shape, nfield, ...).
         batch_shape = field.x.shape[:-1]
@@ -294,6 +293,7 @@ class RaytracedOpticalModel:
                 theta_y=thy.to_value(u.rad),
                 optic=telescope,
                 wavelength=self.wavelength.to_value(u.m),
+                projection="gnomonic",
             )
             rays = telescope.trace(rays)
             w = ~rays.vignetted
@@ -305,6 +305,7 @@ class RaytracedOpticalModel:
                     theta_y=thy.to_value(u.rad),
                     optic=telescope,
                     wavelength=self.wavelength.to_value(u.m),
+                    projection="gnomonic",
                 )
                 cr = telescope.trace(cr)
                 fpx_ = cr.x[0]
@@ -323,6 +324,7 @@ class RaytracedOpticalModel:
                     theta_y=thy.to_value(u.rad),
                     optic=telescope,
                     wavelength=self.wavelength.to_value(u.m),
+                    projection="gnomonic",
                 )
                 ring = telescope.trace(ring)
                 fpx_ = np.mean(ring.x)
@@ -344,7 +346,6 @@ class RaytracedOpticalModel:
             y=fpy.reshape(batch_shape + (nfield,)) * 1e3 << u.mm,
             frame="ccs",
             rtp=self.rtp,
-            wcs=field.wcs,
             camera=field.camera,
         )
         return Spots(
@@ -471,6 +472,7 @@ class RaytracedOpticalModel:
                         jmax=jmax,
                         eps=PUPIL_INNER / PUPIL_OUTER,
                         reference=reference,
+                        projection="gnomonic",
                     )
                 except ValueError:
                     zk1 = np.full(jmax + 1, np.nan)
@@ -487,6 +489,7 @@ class RaytracedOpticalModel:
                         eps=PUPIL_INNER / PUPIL_OUTER,
                         focal_length=10.31,
                         reference=reference,
+                        projection="gnomonic",
                     )
                 except ValueError:
                     zk1 = np.full(jmax + 1, np.nan)
