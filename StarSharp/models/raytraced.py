@@ -683,6 +683,7 @@ class RaytracedOpticalModel:
         steps: State,
         nrad: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
+        include_chip_heights: bool = True,
         tqdm: type[TqdmType] | None = None,
     ) -> Sensitivity:
         """Compute the spot-diagram sensitivity matrix via finite differences.
@@ -702,6 +703,9 @@ class RaytracedOpticalModel:
             Whether to center spot diagrams on the chief ray intersection,
             the mean intersection of all unvignetted rays, or the mean of a
             ring of (possibly vignetted) rays.
+        include_chip_heights : bool
+            Whether to include the effect of CCD chip height variations in the
+            spot diagrams used for Zernike computation.
         tqdm : tqdm | None
             Optional tqdm progress bar.
 
@@ -714,6 +718,7 @@ class RaytracedOpticalModel:
             field=field,
             nrad=nrad,
             reference=reference,
+            include_chip_heights=include_chip_heights,
         )
 
         perturbed = []
@@ -734,6 +739,7 @@ class RaytracedOpticalModel:
                     state=dstate,
                     nrad=nrad,
                     reference=reference,
+                    include_chip_heights=include_chip_heights,
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)
@@ -769,14 +775,11 @@ class RaytracedOpticalModel:
 
     def double_zernikes_sensitivity(
         self,
-        field: FieldCoords,
-        steps: State,
         kmax: int = 28,
         field_outer=None,
         field_inner=None,
-        jmax: int = 28,
-        rings: int = 10,
         tqdm: type[TqdmType] | None = None,
+        **kwargs,
     ) -> Sensitivity:
         """Compute the double-Zernike sensitivity matrix via finite differences.
 
@@ -786,22 +789,16 @@ class RaytracedOpticalModel:
 
         Parameters
         ----------
-        field : FieldCoords
-            Field sampling used for the Zernike computation.
-        steps : State
-            Per-DOF step sizes.
         kmax : int
             Maximum field Noll index for the double-Zernike fit (default: 28).
         field_outer : Quantity
             Outer field radius for the field-Zernike basis.  Required.
         field_inner : Quantity or None
             Inner field radius.  Defaults to zero.
-        jmax : int
-            Maximum pupil Noll index (default: 28).
-        rings : int
-            Quadrature rings for the underlying :meth:`zernikes` call.
         tqdm : tqdm | None
             Optional tqdm progress bar forwarded to :meth:`zernikes_sensitivity`.
+        **kwargs
+            Extra keyword arguments forwarded to :meth:`zernikes_sensitivity`.
 
         Returns
         -------
@@ -809,19 +806,15 @@ class RaytracedOpticalModel:
             Gradient shape ``(ndof, kmax+1, jmax+1)``.
         """
         zk_sens = self.zernikes_sensitivity(
-            field=field,
-            steps=steps,
-            jmax=jmax,
-            rings=rings,
-            tqdm=tqdm,
+            **kwargs
         )
         dz_nominal = zk_sens.nominal.double(kmax, field_outer, field_inner)
         dz_gradient = zk_sens.gradient.double(kmax, field_outer, field_inner)
         return Sensitivity(
             gradient=dz_gradient,
             nominal=dz_nominal,
-            basis=steps.basis,
-            use_dof=steps.use_dof,
-            n_dof=steps.n_dof,
-            Vh=steps.Vh,
+            basis=zk_sens.basis,
+            use_dof=zk_sens.use_dof,
+            n_dof=zk_sens.n_dof,
+            Vh=zk_sens.Vh,
         )
