@@ -178,6 +178,39 @@ class RaytracedOpticalModel:
         )
         return fc
 
+    def make_wfs_mean_field(
+        self,
+    ) -> FieldCoords:
+        """Create a field with one point per wavefront sensor pair,
+        located at the mean center of the pair.
+
+        Requires ``camera`` to be set on the model and include WFS detectors.
+
+        Returns
+        -------
+        FieldCoords
+        """
+        if self.camera is None:
+            raise ValueError("Camera must be set on the model to use this method")
+        x = []
+        y = []
+        for det1, det2 in [
+            [191, 192],
+            [195, 196],
+            [199, 200],
+            [203, 204],
+        ]:
+            corner_fc = self.make_ccd_field(nx=1, types="ITL_WF", detnums=[det1, det2])
+            x.append(np.mean(corner_fc.ccs.x.to_value(u.mm)))
+            y.append(np.mean(corner_fc.ccs.y.to_value(u.mm)))
+        return FieldCoords(
+            np.array(x) << u.mm,
+            np.array(y) << u.mm,
+            frame="ccs",
+            rtp=self.rtp,
+            camera=self.camera
+        )
+
     def spots(
         self,
         field: FieldCoords,
