@@ -89,7 +89,7 @@ class RaytracedOpticalModel:
         else:
             self.steps = None
 
-    def make_hex_field(self, outer=2.0 * u.deg, nrad=20, naz=None, frame="ocs"):
+    def make_hex_field(self, outer=2.0 * u.deg, nrad=20, naz=None):
         """Create a hexapolar grid of field coordinates.
 
         Parameters
@@ -101,8 +101,6 @@ class RaytracedOpticalModel:
         naz : int or None
             Number of azimuthal points on the outermost ring.  Defaults to
             ``int(2π * nrad)``.
-        frame : str
-            Output coordinate frame (default: ``'ocs'``).
 
         Returns
         -------
@@ -113,22 +111,19 @@ class RaytracedOpticalModel:
         thx, thy = batoid.utils.hexapolar(
             outer=outer.to_value(u.deg), nrad=nrad, naz=naz
         )
-        return FieldCoords.from_builder(
+        return FieldCoords(
             thx * u.deg,
             thy * u.deg,
-            builder=self.builder,
-            wavelength=self.wavelength,
+            frame="ocs",
             rtp=self.rtp,
-            camera=self.camera,
-            frame=frame,
+            camera=self.camera
         )
 
     def make_ccd_field(
         self,
         nx: int = 1,
-        frame="ocs",
         types=("E2V", "ITL"),
-        detnums: set[int] | None = None,
+        detnums: list[int] | None = None,
     ):
         """Create a field grid with one point per CCD (or per CCD sub-cell).
 
@@ -139,12 +134,10 @@ class RaytracedOpticalModel:
         nx : int
             Number of grid points per axis within each detector (default: 1,
             i.e. the detector center).
-        frame : str
-            Output coordinate frame (default: ``'ocs'``).
         types : tuple[str, ...]
             Physical detector types to include (default: ``('E2V', 'ITL')``).
-        detnums : set[int] or None
-            Explicit set of detector IDs to include.  Defaults to all detectors.
+        detnums : list[int] or None
+            Explicit list of detector IDs to include.  Defaults to all detectors.
 
         Returns
         -------
@@ -155,7 +148,7 @@ class RaytracedOpticalModel:
         if self.camera is None:
             raise ValueError("Camera must be set on the model to use this method")
         if detnums is None:
-            detnums = set(range(len(self.camera)))
+            detnums = list(range(len(self.camera)))
         x = []
         y = []
         for det in self.camera:
@@ -175,16 +168,14 @@ class RaytracedOpticalModel:
             xx, yy = np.meshgrid(xx, yy)
             x.extend(xx.ravel())
             y.extend(yy.ravel())
-        fc = FieldCoords.from_builder(
+        fc = FieldCoords(
             np.array(x) << u.mm,
             np.array(y) << u.mm,
-            builder=self.builder,
-            wavelength=self.wavelength,
-            rtp=self.rtp,
-            camera=self.camera,
             frame="ccs",
+            rtp=self.rtp,
+            camera=self.camera
         )
-        return getattr(fc, frame)
+        return fc
 
     def spots(
         self,
