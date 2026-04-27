@@ -5,10 +5,37 @@ from typing import Generic, TypeVar, get_args
 
 import numpy as np
 
+from .observable import SensitivityObservable
 from .state import Basis, State, StateSchema
 
 
-ObsT = TypeVar("ObsT")
+ObsT = TypeVar("ObsT", bound=SensitivityObservable)
+
+
+def _assert_observable_protocol(obj, name: str = "observable") -> None:
+    """Validate that *obj* satisfies the observable protocol required by Sensitivity."""
+    cls = type(obj)
+
+    if not hasattr(obj, "__len__"):
+        raise TypeError(f"{name} must define __len__")
+    if not hasattr(obj, "__getitem__"):
+        raise TypeError(f"{name} must define __getitem__")
+
+    fields = getattr(cls, "_sensitivity_fields", None)
+    if not isinstance(fields, tuple) or not fields or any(
+        not isinstance(f, str) for f in fields
+    ):
+        raise TypeError(
+            f"{name} type must define class attribute _sensitivity_fields "
+            "as a non-empty tuple[str, ...]"
+        )
+
+    bfields = getattr(cls, "_broadcast_fields", ())
+    if not isinstance(bfields, tuple) or any(not isinstance(f, str) for f in bfields):
+        raise TypeError(
+            f"{name} type must define class attribute _broadcast_fields "
+            "as tuple[str, ...] when present"
+        )
 
 
 @dataclass(frozen=True)
@@ -62,6 +89,10 @@ class Sensitivity(Generic[ObsT]):
     basis: Basis = "f"
 
     def __post_init__(self):
+        _assert_observable_protocol(self.gradient, name="gradient")
+        if self.nominal is not None:
+            _assert_observable_protocol(self.nominal, name="nominal")
+
         basis_values = get_args(Basis)
         if self.basis not in basis_values:
             raise ValueError(
@@ -90,6 +121,8 @@ class Sensitivity(Generic[ObsT]):
             )
 
         if self.nominal is None:
+            if len(self.gradient) == 0:
+                raise ValueError("gradient must have at least one slice to infer nominal")
             grad0 = self.gradient[0]
             updates = {
                 f: np.zeros_like(getattr(grad0, f))
@@ -264,20 +297,41 @@ class Sensitivity(Generic[ObsT]):
 
         Parameters
         ----------
-        nominal : T
+        nominal : ObsT
             The unperturbed observable.
-        perturbed_list : list[T]
+        perturbed_list : list[ObsT]
             One perturbed observable per DOF, in the same order as
             ``steps.value``.
         steps : State
             Step sizes.  ``steps.schema`` is propagated to the returned
             Sensitivity.
 
+        Raises
+        ------
+        TypeError
+            If ``nominal`` or any item in ``perturbed_list`` does not satisfy
+            the observable protocol required by ``Sensitivity``, or if a
+            perturbed item has a different concrete type than ``nominal``.
+        ValueError
+            If ``len(perturbed_list)`` does not equal ``len(steps.value)``.
+
         Returns
         -------
-        Sensitivity[T]
-            A new sensitivity in the same basis as ``steps``.
+        Sensitivity[ObsT]
+            Sensitivity object whose ``nominal`` is the input ``nominal``,
+            whose ``gradient`` is finite-difference derivatives from
+            ``perturbed_list``, and whose ``basis``/``schema`` are copied
+            from ``steps``.
         """
+        _assert_observable_protocol(nominal, name="nominal")
+
+        for i, perturbed in enumerate(perturbed_list):
+            _assert_observable_protocol(perturbed, name=f"perturbed_list[{i}]")
+            if type(perturbed) is not type(nominal):
+                raise TypeError(
+                    "All perturbed observables must have the same concrete type as nominal"
+                )
+
         if len(perturbed_list) != len(steps.value):
             raise ValueError(
                 "perturbed_list length must match number of step coefficients: "
