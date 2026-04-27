@@ -1,300 +1,576 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Literal, TypeAlias, get_args
 
+import astropy.units as u
 import numpy as np
 from numpy.typing import NDArray
 
 
+Basis: TypeAlias = Literal["f", "x", "v"]
+
+
 @dataclass(frozen=True)
-class State:
-    VALID_BASES = ("x", "f", "v")
+class StateSchema:
+    """Pure descriptor for the DOF structure shared by State and Sensitivity.
 
-    """Alignment state in one of three bases.
-
-    Analogous to `FieldCoords` with its ``frame`` attribute:
-    ``value`` holds the coefficient vector and ``basis`` identifies
-    the representation.  Use the ``.x``, ``.f``, and ``.v``
-    properties to convert between bases (each returns a new
-    ``State``).
-
-    Three bases
-    -----------
-    ``"f"`` — full DOF vector (length ``n_dof``).
-        Inactive DOFs (not in ``use_dof``) are zero.
-    ``"x"`` — active-DOF vector (length ``n_active``).
-        The entries of the full vector selected by ``use_dof``.
-    ``"v"`` — SVD-truncated orthogonal-basis vector (length ``n_keep``).
-        Only available when ``Vh`` is set.
-        The roundtrip ``x → v → x`` is lossy when
-        ``Vh`` is not square, though ``v → x → v`` is lossless.
+    Owns the DOF metadata and basis-conversion context but does not create
+    State objects.  Constructible without a sensitivity matrix so callers
+    can bootstrap workflows before sensitivity matrices exist.
 
     Parameters
     ----------
-    value : NDArray[np.floating]
-        Coefficient vector in the basis given by ``basis``.
-    basis : str
-        One of ``"x"``, ``"f"``, or ``"v"``.
-    use_dof : NDArray[np.integer] or None
-        Indices of the active DOFs.  Required for conversions
-        involving ``"x"`` or ``"v"`` bases.  When constructing
-        in ``"f"`` basis with no conversions needed, may be omitted.
-    n_dof : int or None
-        Total number of DOFs.  Inferred from ``value`` when
-        ``basis="f"``.  Required when constructing in ``"x"`` or
-        ``"v"`` basis and converting to ``"f"``.
-    Vh : NDArray[np.floating] or None
-        Right singular vectors, shape ``(n_keep, n_active)``.
-        Required for any conversion involving the ``"v"`` basis.
+    dof_names : sequence of str
+        Full-DOF names in f-basis order.
+    dof_units : sequence of unit-like
+        Full-DOF units in f-basis order.  Entries are parsed via
+        ``astropy.units.Unit``.
+    use_dof : sequence of int or None
+        Active DOF indices for x-basis.  If None, all DOFs are active.
+    Vh : ndarray or None
+        Mode mixing matrix for v-basis.  If None, v-basis is not supported.
+        Must have shape (n_keep, n_active) where n_active = len(use_dof).
+    S : ndarray or None
+        Singular values from the SVD, shape (n_keep,).  Optional; stored for
+        diagnostics but not used for basis conversion.
+    U : ndarray or None
+        Left singular vectors from the SVD, shape (n_obs, n_keep).  Optional;
+        stored for diagnostics but not used for basis conversion.
     """
 
-    value: NDArray[np.floating]
-    basis: str = "x"
+    dof_names: tuple[str, ...]
+    dof_units: tuple[u.UnitBase, ...]
     use_dof: NDArray[np.integer] | None = None
-    n_dof: int | None = None
     Vh: NDArray[np.floating] | None = None
+    S: NDArray[np.floating] | None = None
+    U: NDArray[np.floating] | None = None
 
     def __post_init__(self):
-        object.__setattr__(self, "value", np.asarray(self.value, dtype=float))
-        if self.basis not in self.VALID_BASES:
+        names = tuple(str(n) for n in self.dof_names)
+        units = tuple(u.Unit(unit) for unit in self.dof_units)
+        if len(names) == 0:
+            raise ValueError("dof_names must not be empty")
+        if len(units) != len(names):
             raise ValueError(
-                f"basis must be one of {self.VALID_BASES}, got {self.basis!r}"
+                "dof_units must have same length as dof_names, "
+                f"got {len(units)} vs {len(names)}"
             )
-        if self.basis == "f":
-            if self.n_dof is None:
-                object.__setattr__(self, "n_dof", len(self.value))
-            if len(self.value) != self.n_dof:
-                raise ValueError(
-                    f"Length of value ({len(self.value)}) does not match n_dof ({self.n_dof})"
-                )
-        if self.basis == "v" and self.Vh is None:
-            raise ValueError("Vh must be set when constructing State with basis='v'")
 
-    def _require(self, name: str):
-        val = getattr(self, name)
-        if val is None:
-            raise ValueError(f"{name} must be set on the State to use this conversion")
-        return val
+        if self.use_dof is None:
+            use_dof = np.arange(len(names), dtype=int)
+        else:
+            use_dof = np.asarray(self.use_dof, dtype=int)
+            if use_dof.ndim != 1:
+                raise ValueError("use_dof must be a 1D index array")
+            if np.any(use_dof < 0) or np.any(use_dof >= len(names)):
+                raise ValueError("use_dof contains out-of-range indices")
+
+        if self.Vh is not None:
+            Vh = np.asarray(self.Vh, dtype=float)
+            if Vh.ndim != 2 or Vh.shape[1] != len(use_dof):
+                raise ValueError(
+                    f"Vh must have shape (n_keep, n_active={len(use_dof)}), "
+                    f"got {Vh.shape}"
+                )
+        else:
+            Vh = None
+
+        n_keep = Vh.shape[0] if Vh is not None else None
+
+        if self.S is not None:
+            S = np.asarray(self.S, dtype=float)
+            if S.ndim != 1:
+                raise ValueError("S must be a 1D array of singular values")
+            if n_keep is not None and S.shape[0] != n_keep:
+                raise ValueError(
+                    f"S must have length n_keep={n_keep}, got {S.shape[0]}"
+                )
+        else:
+            S = None
+
+        if self.U is not None:
+            U = np.asarray(self.U, dtype=float)
+            if U.ndim != 2:
+                raise ValueError("U must be a 2D array of left singular vectors")
+            expected_cols = n_keep if n_keep is not None else (S.shape[0] if S is not None else None)
+            if expected_cols is not None and U.shape[1] != expected_cols:
+                raise ValueError(
+                    f"U must have shape (n_obs, n_keep={expected_cols}), got {U.shape}"
+                )
+        else:
+            U = None
+
+        object.__setattr__(self, "dof_names", names)
+        object.__setattr__(self, "dof_units", units)
+        object.__setattr__(self, "use_dof", use_dof)
+        object.__setattr__(self, "Vh", Vh)
+        object.__setattr__(self, "S", S)
+        object.__setattr__(self, "U", U)
+
+    @property
+    def n_dof(self) -> int:
+        return len(self.dof_names)
 
     @property
     def n_active(self) -> int:
-        """Number of active DOFs."""
-        use_dof = self._require("use_dof")
-        return len(use_dof)
+        return len(self.use_dof)
 
     @property
     def n_keep(self) -> int:
-        """Number of SVD modes retained."""
-        Vh = self._require("Vh")
-        return Vh.shape[0]
+        if self.Vh is None:
+            raise ValueError("n_keep is not defined: Vh has not been set on this schema")
+        return self.Vh.shape[0]
+
+    def with_svd(
+        self,
+        sensitivity,
+        norm: NDArray[np.floating] | None = None,
+        n_keep: int | None = None,
+    ) -> StateSchema:
+        """Return a new StateSchema with Vh computed from an x-basis Sensitivity.
+
+        The SVD is computed on the design matrix ``A @ diag(norm)`` where ``A``
+        has shape ``(n_obs, n_active)`` and is extracted from the x-basis
+        sensitivity gradient.  ``Vh`` is stored as
+        ``Vh_raw[:n_keep] @ diag(norm)`` so that v-basis coefficients have
+        units of physical DOF perturbations (i.e. the norm is baked in).
+
+        Parameters
+        ----------
+        sensitivity : Sensitivity
+            An f- or x-basis sensitivity with a schema compatible with this
+            one (same ``dof_names``, ``dof_units``, ``use_dof``).  v-basis
+            is not accepted because basis narrowing is one-way.
+        norm : array-like of float or None
+            Per-active-DOF normalisation factors.  May have length
+            ``n_active`` or ``n_dof`` (sliced by ``use_dof`` in the latter
+            case).  Defaults to all-ones.
+        n_keep : int or None
+            Number of SVD modes to retain.  Defaults to ``n_active``
+            (no truncation).
+
+        Returns
+        -------
+        StateSchema
+            A copy of this schema with ``Vh`` set.
+        """
+        # Lazy import to avoid circular dependency (sensitivity imports state).
+        from .sensitivity import Sensitivity, _sensitivity_to_x_matrix
+
+        if not isinstance(sensitivity, Sensitivity):
+            raise TypeError("sensitivity must be a Sensitivity instance")
+        if sensitivity.basis == "v":
+            raise ValueError(
+                "sensitivity must be in f- or x-basis for with_svd; "
+                "v-basis is not accepted because basis narrowing is one-way"
+            )
+
+        other = sensitivity.schema
+        if self.dof_names != other.dof_names:
+            raise ValueError("sensitivity.schema.dof_names does not match this schema")
+        if self.dof_units != other.dof_units:
+            raise ValueError("sensitivity.schema.dof_units does not match this schema")
+        if not np.array_equal(self.use_dof, other.use_dof):
+            raise ValueError("sensitivity.schema.use_dof does not match this schema")
+
+        A = _sensitivity_to_x_matrix(sensitivity)  # (n_obs, n_active)
+
+        if norm is None:
+            norm_x = np.ones(self.n_active, dtype=float)
+        else:
+            norm = np.asarray(norm, dtype=float)
+            if norm.shape == (self.n_dof,):
+                norm_x = norm[self.use_dof]
+            elif norm.shape == (self.n_active,):
+                norm_x = norm
+            else:
+                raise ValueError(
+                    f"norm must have length n_active={self.n_active} or "
+                    f"n_dof={self.n_dof}, got length {len(norm)}"
+                )
+
+        U_raw, S_raw, Vh_raw = np.linalg.svd(A @ np.diag(norm_x), full_matrices=False)
+
+        if n_keep is None:
+            n_keep = self.n_active
+        if n_keep > Vh_raw.shape[0]:
+            raise ValueError(
+                f"n_keep={n_keep} exceeds the number of singular values "
+                f"({Vh_raw.shape[0]})"
+            )
+
+        Vh_scaled = Vh_raw[:n_keep] @ np.diag(norm_x)
+        U_keep = U_raw[:, :n_keep]  # (n_obs, n_keep)
+        S_keep = S_raw[:n_keep]     # (n_keep,)
+        return replace(self, Vh=Vh_scaled, S=S_keep, U=U_keep)
+
+
+@dataclass(frozen=True)
+class StateFactory:
+    """Thin factory for creating `State` objects from a `StateSchema`.
+
+    Parameters
+    ----------
+    schema : StateSchema
+        DOF structure descriptor shared across State and Sensitivity objects.
+    """
+
+    schema: StateSchema
+
+    # ------------------------------------------------------------------
+    # Passthrough properties so callers can use factory.n_dof etc.
+    # ------------------------------------------------------------------
 
     @property
-    def x(self) -> State:
-        """State in the active-DOF (x) basis."""
-        if self.basis == "x":
-            return self
-        if self.basis == "f":
-            use_dof = self._require("use_dof")
-            return replace(self, value=self.value[use_dof], basis="x")
-        # basis == "v"
-        Vh = self._require("Vh")
-        return replace(self, value=self.value @ Vh, basis="x")
+    def dof_names(self) -> tuple[str, ...]:
+        return self.schema.dof_names
+
+    @property
+    def dof_units(self) -> tuple[u.UnitBase, ...]:
+        return self.schema.dof_units
+
+    @property
+    def use_dof(self) -> NDArray[np.integer]:
+        return self.schema.use_dof
+
+    @property
+    def Vh(self) -> NDArray[np.floating] | None:
+        return self.schema.Vh
+
+    @property
+    def n_dof(self) -> int:
+        return self.schema.n_dof
+
+    @property
+    def n_active(self) -> int:
+        return self.schema.n_active
+
+    @property
+    def n_keep(self) -> int:
+        return self.schema.n_keep
+
+    # ------------------------------------------------------------------
+    # State construction
+    # ------------------------------------------------------------------
+
+    def f(self, value) -> State:
+        """Create a State in full-DOF (f) basis.
+
+        Parameters
+        ----------
+        value : array-like, shape (n_dof,)
+            State values for all DOFs.
+
+        Returns
+        -------
+        State
+        """
+        return State(value=value, basis="f", schema=self.schema)
+
+    def x(self, value) -> State:
+        """Create a State in active-DOF (x) basis.
+
+        Parameters
+        ----------
+        value : array-like, shape (n_active,)
+            State values for the active DOFs selected by ``use_dof``.
+
+        Returns
+        -------
+        State
+        """
+        return State(value=value, basis="x", schema=self.schema)
+
+    def v(self, value) -> State:
+        """Create a State in SVD mode (v) basis.
+
+        Parameters
+        ----------
+        value : array-like, shape (n_keep,)
+            State values in the truncated SVD mode basis.
+
+        Returns
+        -------
+        State
+        """
+        if self.Vh is None:
+            raise ValueError("schema.Vh must be set to construct a State in 'v' basis")
+        return State(value=value, basis="v", schema=self.schema)
+
+    def by_name(self, **kwargs) -> State:
+        """Create a State from named coefficients.
+
+        Accepted key patterns
+        ---------------------
+        1. Active x-basis DOF names only:
+           Keys must be members of ``dof_names[use_dof]``.
+        2. v-basis mode names only:
+           Keys must match ``vmodeN`` where ``N`` is a 1-indexed integer.
+
+        Mixing DOF names with ``vmodeN`` keys is not allowed.
+        Any coefficient not explicitly provided is set to 0.0.
+        """
+        if not kwargs:
+            return self.zero("x")
+
+        active_names = tuple(self.dof_names[i] for i in self.use_dof)
+        active_name_to_idx = {name: i for i, name in enumerate(active_names)}
+
+        def _vmode_index(name: str) -> int | None:
+            if not name.startswith("vmode"):
+                return None
+            suffix = name[5:]
+            if not suffix.isdigit():
+                return None
+            idx = int(suffix)
+            if idx < 1:
+                return None
+            return idx
+
+        keys = tuple(kwargs.keys())
+        is_active = {k: k in active_name_to_idx for k in keys}
+        vmode_index = {k: _vmode_index(k) for k in keys}
+        is_vmode = {k: vmode_index[k] is not None for k in keys}
+
+        has_active = any(is_active.values())
+        has_vmode = any(is_vmode.values())
+        if has_active and has_vmode:
+            raise ValueError(
+                "Cannot mix active DOF names with vmodeN kwargs in StateFactory.by_name"
+            )
+
+        invalid = [k for k in keys if (not is_active[k] and not is_vmode[k])]
+        if invalid:
+            raise ValueError(
+                "Invalid kwargs names for StateFactory.by_name: "
+                f"{sorted(invalid)!r}. Expected active DOF names {active_names!r} "
+                "or vmodeN keys (1-indexed)."
+            )
+
+        if has_vmode:
+            if self.Vh is None:
+                raise ValueError("schema.Vh must be set to construct a State in 'v' basis")
+
+            vvalue = np.zeros(self.n_keep, dtype=float)
+            for k, v in kwargs.items():
+                mode_idx = vmode_index[k]
+                if mode_idx > self.n_keep:
+                    raise ValueError(
+                        f"{k!r} is out of range for n_keep={self.n_keep}; "
+                        f"valid keys are vmode1..vmode{self.n_keep}"
+                    )
+                vvalue[mode_idx - 1] = v
+            return self.v(vvalue)
+
+        xvalue = np.zeros(self.n_active, dtype=float)
+        for k, v in kwargs.items():
+            xvalue[active_name_to_idx[k]] = v
+        return self.x(xvalue)
+
+    def zero(self, basis: Basis = "f") -> State:
+        """Return a zero-valued State in the requested basis.
+
+        Parameters
+        ----------
+        basis : {'f', 'x', 'v'}, optional
+            Basis for the returned state.  Defaults to ``'f'``.
+
+        Returns
+        -------
+        State
+        """
+        if basis == "f":
+            value = np.zeros(self.n_dof, dtype=float)
+        elif basis == "x":
+            value = np.zeros(self.n_active, dtype=float)
+        elif basis == "v":
+            if self.Vh is None:
+                raise ValueError("schema.Vh must be set to create a zero v-basis state")
+            value = np.zeros(self.n_keep, dtype=float)
+        else:
+            raise ValueError(f"basis must be one of ('x', 'f', 'v'), got {basis!r}")
+        return State(value=value, basis=basis, schema=self.schema)
+
+
+@dataclass(frozen=True)
+class State:
+    """Degree-of-freedom state.
+
+    Parameters
+    ----------
+    value : array-like
+        State values in the specified basis.  Shape must be (n_dof,) for
+        f-basis, (n_active,) for x-basis, or (n_keep,) for v-basis.
+    schema : StateSchema
+        DOF descriptor providing metadata and basis-conversion context.
+    basis : {'f', 'x', 'v'}, optional
+        Basis of the state values.  ``'f'`` is the full-DOF basis, ``'x'``
+        is the active-DOF basis, and ``'v'`` is the SVD mode basis defined
+        by the schema's ``Vh`` matrix.  Default is ``'x'``.
+    """
+
+    value: NDArray[np.floating]
+    schema: StateSchema
+    basis: Basis = "x"
+
+
+
+    def __post_init__(self):
+        basis_values = get_args(Basis)
+        if self.basis not in basis_values:
+            raise ValueError(
+                f"basis must be one of {basis_values}, got {self.basis!r}"
+            )
+
+        value = np.asarray(self.value, dtype=float)
+        object.__setattr__(self, "value", value)
+
+        if not isinstance(self.schema, StateSchema):
+            raise TypeError(f"schema must be a StateSchema, got {type(self.schema).__name__}")
+
+        if self.basis == "f" and len(value) != self.schema.n_dof:
+            raise ValueError(
+                f"f-basis value must have length {self.schema.n_dof}, got {len(value)}"
+            )
+        if self.basis == "x" and len(value) != self.schema.n_active:
+            raise ValueError(
+                f"x-basis value must have length {self.schema.n_active}, got {len(value)}"
+            )
+        if self.basis == "v":
+            if self.schema.Vh is None:
+                raise ValueError("schema.Vh must be set to construct a State in 'v' basis")
+            if len(value) != self.schema.n_keep:
+                raise ValueError(
+                    f"v-basis value must have length {self.schema.n_keep}, got {len(value)}"
+                )
+
+    @property
+    def n_dof(self) -> int:
+        return self.schema.n_dof
+
+    @property
+    def use_dof(self) -> NDArray[np.integer]:
+        return self.schema.use_dof
+
+    @property
+    def Vh(self) -> NDArray[np.floating] | None:
+        return self.schema.Vh
+
+    @property
+    def dof_names(self) -> tuple[str, ...]:
+        return self.schema.dof_names
+
+    @property
+    def dof_units(self) -> tuple[u.UnitBase, ...]:
+        return self.schema.dof_units
 
     @property
     def f(self) -> State:
-        """State in the full-DOF (f) basis."""
+        """Return this state in full-DOF basis."""
         if self.basis == "f":
             return self
-        xs = self.x  # go through x-basis
-        use_dof = self._require("use_dof")
-        n_dof = self._require("n_dof")
-        fvalue = np.zeros(n_dof, dtype=float)
-        fvalue[use_dof] = xs.value
-        return replace(self, value=fvalue, basis="f")
+
+        if self.basis == "v":
+            return self.x.f
+
+        schema = self.schema
+        fvalue = np.zeros(schema.n_dof, dtype=float)
+        fvalue[schema.use_dof] = self.value
+        return State(value=fvalue, basis="f", schema=schema)
+
+    @property
+    def x(self) -> State:
+        """Return this state in active-DOF basis."""
+        if self.basis == "x":
+            return self
+
+        if self.basis == "v":
+            return State(value=self.schema.Vh.T @ self.value, basis="x", schema=self.schema)
+
+        schema = self.schema
+        return State(value=self.value[schema.use_dof], basis="x", schema=schema)
 
     @property
     def v(self) -> State:
-        """State in the SVD-truncated orthogonal (v) basis."""
+        """Return this state in v-basis."""
         if self.basis == "v":
             return self
-        Vh = self._require("Vh")
-        xs = self.x  # go through x-basis
-        return replace(self, value=xs.value @ Vh.T, basis="v")
+        schema = self.schema
+        if schema.Vh is None:
+            raise ValueError("schema.Vh must be set to convert to v-basis")
+        return State(value=schema.Vh @ self.x.value, basis="v", schema=schema)
 
-    def __repr__(self) -> str:
-        return f"State({self.value!r}, basis={self.basis!r})"
+    @property
+    def f_names(self) -> tuple[str, ...]:
+        """DOF names in full-DOF (f-basis) order."""
+        return self.dof_names
+
+    @property
+    def f_units(self) -> tuple[u.UnitBase, ...]:
+        """DOF units in full-DOF (f-basis) order."""
+        return self.dof_units
+
+    @property
+    def x_names(self) -> tuple[str, ...]:
+        """DOF names for the active DOFs selected by ``use_dof``."""
+        return tuple(self.dof_names[i] for i in self.schema.use_dof)
+
+    @property
+    def x_units(self) -> tuple[u.UnitBase, ...]:
+        """DOF units for the active DOFs selected by ``use_dof``."""
+        return tuple(self.dof_units[i] for i in self.schema.use_dof)
+
+    def _compatible_schema(self, other: State) -> bool:
+        return (
+            self.dof_names == other.dof_names
+            and self.dof_units == other.dof_units
+        )
 
     def __add__(self, other):
+        """Add two States element-wise, promoting to f-basis.
+
+        Both States must have compatible ``dof_names`` and ``dof_units``.
+        The result is always returned in f-basis.  The result schema retains
+        ``use_dof`` when both inputs share the same active set; it retains
+        ``Vh`` only when both inputs share the same ``Vh``.
+        """
         if not isinstance(other, State):
             return NotImplemented
-        if (
-            self.n_dof is not None
-            and other.n_dof is not None
-            and self.n_dof != other.n_dof
-        ):
-            raise ValueError("Cannot add States with different n_dof")
+        if not self._compatible_schema(other):
+            raise ValueError("Cannot add State objects with incompatible schemas")
 
-        if (
-            self.use_dof is not None
-            and other.use_dof is not None
-            and np.array_equal(self.use_dof, other.use_dof)
-        ):
-            if (
-                self.n_dof is not None
-                and other.n_dof is not None
-                and self.n_dof == other.n_dof
-            ):
-                if (
-                    self.Vh is not None
-                    and other.Vh is not None
-                    and np.array_equal(self.Vh, other.Vh)
-                ):
-                    # Same use_dof, n_dof, and Vh: add in f-basis
-                    return replace(
-                        self,
-                        value=self.f.value + other.f.value,
-                        basis="f",
-                    )
-
-        return State(
-            value=self.f.value + other.f.value,
-            basis="f",
-            n_dof=self.n_dof
+        value = self.f.value + other.f.value
+        same_use_dof = np.array_equal(self.use_dof, other.use_dof)
+        same_Vh = (
+            (self.Vh is None and other.Vh is None)
+            or (
+                self.Vh is not None
+                and other.Vh is not None
+                and np.array_equal(self.Vh, other.Vh)
+            )
         )
+
+        if same_use_dof and same_Vh:
+            schema = self.schema
+        elif same_use_dof:
+            schema = StateSchema(
+                dof_names=self.dof_names,
+                dof_units=self.dof_units,
+                use_dof=self.use_dof,
+                Vh=None,
+            )
+        else:
+            schema = StateSchema(dof_names=self.dof_names, dof_units=self.dof_units)
+        return State(value=value, basis="f", schema=schema)
 
     def __mul__(self, scalar):
         if not np.isscalar(scalar):
             return NotImplemented
-        return replace(self, value=self.value * scalar)
+        return State(value=self.value * scalar, basis=self.basis, schema=self.schema)
 
+    def __rmul__(self, scalar):
+        return self.__mul__(scalar)
 
-def _sensitivity_to_matrix(sens) -> np.ndarray:
-    """Extract a ``(n_obs, n_dof)`` design matrix from a ``Sensitivity``.
-
-    Works for any observable type that defines ``_sensitivity_fields``.
-    For ``Sensitivity[Spots]``, vignetted rays (as recorded on the gradient)
-    are excluded from the matrix.
-    """
-    from .spots import Spots
-
-    gradient = sens.gradient
-    obs_type = type(gradient)
-    n_dof = gradient.batch_shape[0]
-
-    # Build a column mask: True where we keep the observation.
-    is_spots = isinstance(sens.gradient, Spots)
-    if is_spots:
-        valid = ~sens.gradient[0].vignetted.ravel()  # (n_field * n_ray,)
-    else:
-        valid = None
-
-    chunks = []
-    for f in obs_type._sensitivity_fields:
-        arr = getattr(gradient, f)
-        arr = arr.value if hasattr(arr, "value") else np.asarray(arr, dtype=float)
-        arr = arr.reshape(n_dof, -1)  # (n_dof, n_flat_obs)
-        if valid is not None:
-            arr = arr[:, valid]  # (n_dof, n_valid_obs)
-        chunks.append(arr)
-
-    return np.concatenate(chunks, axis=1).T  # (total_obs, n_dof)
-
-
-class StateFactory:
-    """Factory for creating `State` objects with shared SVD context.
-
-    Accepts the full sensitivity matrix ``A`` and computes the SVD
-    on construction.  All ``State`` objects produced by this factory
-    carry the ``use_dof``, ``n_dof``, and ``Vh`` needed for basis
-    conversions.
-
-    Parameters
-    ----------
-    A : array-like, int, or Sensitivity
-        Design matrix.  If an array, should have shape ``(nobs, n_dof)``.
-        If an *int* ``n``, an ``n × n`` identity is used.
-        If a :class:`~StarSharp.Sensitivity`, the design matrix is extracted
-        from the sensitivity fields of the gradient (via ``_sensitivity_fields``),
-        flattened and concatenated to ``(nobs, n_dof)``.  For
-        ``Sensitivity[Spots]``, vignetted rays are automatically excluded.
-    norm : array-like of float
-        Normalization factors for each DOF.  The SVD is computed on
-        ``A @ np.diag(norm)``.
-    use_dof : array-like of int
-        Indices of the active DOFs.
-    n_keep : int or None
-        Number of SVD modes to retain.  Defaults to
-        ``len(use_dof)`` (no truncation).
-    """
-
-    def __init__(
-        self,
-        A,
-        norm: NDArray[np.floating] | None = None,
-        use_dof: NDArray[np.integer] | str | None = None,
-        n_keep: int | None = None,
-    ):
-        if isinstance(A, int):
-            A = np.eye(A)
-        else:
-            # Lazy import to avoid circular dependency (sensitivity.py imports State).
-            from .sensitivity import Sensitivity
-
-            if isinstance(A, Sensitivity):
-                A = _sensitivity_to_matrix(A)
-        if use_dof is None:
-            use_dof = np.arange(A.shape[-1])
-        if isinstance(use_dof, str):
-            dof_str = use_dof.replace(" ", "").strip()
-            use_dof = []
-            for part in dof_str.split(","):
-                if "-" in part:
-                    start, end = [int(p) for p in part.split("-")]
-                    use_dof.extend(range(start, end + 1))
-                else:
-                    use_dof.append(int(part))
-            use_dof = np.sort(use_dof)
-        if norm is None:
-            norm = np.ones(A.shape[-1], dtype=float)
-        self.A = np.asarray(A, dtype=float)
-        self.use_dof = np.asarray(use_dof, dtype=int)
-        self.n_dof = self.A.shape[-1]
-        A_norm = self.A @ np.diag(norm)
-        A_sliced = A_norm[..., self.use_dof].reshape(-1, len(self.use_dof))
-        U, S, Vh = np.linalg.svd(A_sliced, full_matrices=False)
-        self.U = U
-        self.S = S
-        self.full_Vh = Vh
-        self.n_keep = n_keep if n_keep is not None else len(S)
-        self.Vh = Vh[: self.n_keep] @ np.diag(norm[use_dof])
-        self.Av = self.A[..., self.use_dof] @ self.Vh.T
-
-    def from_x(self, value) -> State:
-        """Create a State from active-DOF coefficients."""
-        return State(
-            value=value,
-            basis="x",
-            use_dof=self.use_dof,
-            n_dof=self.n_dof,
-            Vh=self.Vh,
-        )
-
-    def from_f(self, value) -> State:
-        """Create a State from full DOF coefficients."""
-        return State(
-            value=value,
-            basis="f",
-            use_dof=self.use_dof,
-            n_dof=self.n_dof,
-            Vh=self.Vh,
-        )
-
-    def from_v(self, value) -> State:
-        """Create a State from orthogonal-basis coefficients."""
-        return State(
-            value=value,
-            basis="v",
-            use_dof=self.use_dof,
-            n_dof=self.n_dof,
-            Vh=self.Vh,
-        )
+    def __repr__(self) -> str:
+        return (f"State(value={self.value!r}, basis={self.basis!r})")

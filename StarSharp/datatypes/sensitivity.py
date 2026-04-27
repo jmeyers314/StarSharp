@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Generic, TypeVar, get_args
 
 import numpy as np
-from numpy.typing import NDArray
 
-from .state import State
+from .state import Basis, State, StateSchema
+
+
+ObsT = TypeVar("ObsT")
 
 
 @dataclass(frozen=True)
-class Sensitivity:
-    VALID_BASES = ("x", "f", "v")
-
+class Sensitivity(Generic[ObsT]):
     """Linear sensitivity of an observable w.r.t. DOF perturbations.
 
     ``Sensitivity[T]`` wraps a *nominal* observable of type ``T`` and a
@@ -19,84 +20,162 @@ class Sensitivity:
     indexes degrees of freedom.  The gradient stores
     ``(perturbed - nominal) / step`` for each DOF.
 
-    Supports ``len()``, integer/slice indexing (into the DOF axis), and
-    linear prediction via :meth:`predict`.
-
     Parameters
     ----------
-    nominal : T
-        The unperturbed observable.
     gradient : T
-        Per-DOF derivatives.  The leading batch dimension (size ``ndof``)
-        indexes degrees of freedom; remaining axes match *nominal*.
-    steps : State
-        Step sizes used for the finite differences.  Its ``basis`` defines
-        the DOF representation in which the gradient is expressed.
+        Per-DOF derivatives.  The leading batch dimension indexes DOFs;
+        remaining axes match *nominal*.
+    schema : StateSchema
+        Shared metadata and conversion context.  Owns ``use_dof``,
+        ``n_dof``, ``dof_names``, ``dof_units``, and optionally ``Vh``.
+    nominal : T or None
+        The unperturbed observable.  If None, inferred from the first
+        gradient slice with zero-valued sensitivity fields.
+    basis : {'f', 'x', 'v'}
+        One of ``"f"``, ``"x"``, or ``"v"``.  Defaults to ``"f"``
+        because ``from_finite_differences`` naturally produces a
+        full-DOF gradient before any narrowing.
+
+    Notes
+    -----
+    Basis narrowing (f → x → v) is supported.  Reverse reconstruction
+    (v → x or v → f, x → f) is intentionally prohibited because
+    projecting to v is lossy when ``n_keep < n_active``.
+
+    Observable protocol
+    -------------------
+    The type ``T`` bound to ``ObsT`` must satisfy the following protocol:
+
+    * ``T._sensitivity_fields`` — class-level tuple of field names whose
+      values are ``Quantity`` arrays with a leading DOF batch dimension in
+      the gradient.
+    * ``T._broadcast_fields`` — class-level tuple of field names that are
+      identical across all DOF slices (e.g. field coordinates).  Optional;
+      defaults to ``()``.
+    * ``T.__getitem__(i)`` — returns the observable slice for DOF index ``i``,
+      used to infer ``nominal`` when it is not supplied explicitly.
     """
 
-    gradient: object
-    nominal: object | None = None
-    basis: str = "x"
-    use_dof: NDArray[np.integer] | str | None = None
-    n_dof: int | None = None
-    Vh: NDArray[np.floating] | None = None
-
-    def __class_getitem__(cls, item):
-        return cls
+    gradient: ObsT
+    schema: StateSchema
+    nominal: ObsT | None = None
+    basis: Basis = "f"
 
     def __post_init__(self):
-        if isinstance(self.use_dof, str):
-            dof_str = self.use_dof.replace(" ", "").strip()
-            parsed = []
-            for part in dof_str.split(","):
-                if "-" in part:
-                    start, end = [int(p) for p in part.split("-")]
-                    parsed.extend(range(start, end + 1))
-                else:
-                    parsed.append(int(part))
-            object.__setattr__(self, "use_dof", np.sort(parsed))
+        basis_values = get_args(Basis)
+        if self.basis not in basis_values:
+            raise ValueError(
+                f"basis must be one of {basis_values}, got {self.basis!r}"
+            )
+
+        if not isinstance(self.schema, StateSchema):
+            raise TypeError("schema must be a StateSchema")
+
+        if self.basis == "f" and len(self.gradient) != self.schema.n_dof:
+            raise ValueError(
+                "f-basis Sensitivity gradient length must match schema.n_dof "
+                f"(n_dof={self.schema.n_dof}), got {len(self.gradient)}"
+            )
+
+        if self.basis == "x" and len(self.gradient) != self.schema.n_active:
+            raise ValueError(
+                "x-basis Sensitivity gradient length must match schema.n_active "
+                f"(len(use_dof)={self.schema.n_active}), got {len(self.gradient)}"
+            )
+
+        if self.basis == "v" and len(self.gradient) != self.schema.n_keep:
+            raise ValueError(
+                "v-basis Sensitivity gradient length must match schema.n_keep "
+                f"(n_keep={self.schema.n_keep}), got {len(self.gradient)}"
+            )
+
         if self.nominal is None:
-            # Set nominal to zeroed-out first gradient slice.
-            # Copy broadcast fields (e.g. vignetted for Spots) unchanged.
             grad0 = self.gradient[0]
             updates = {
                 f: np.zeros_like(getattr(grad0, f))
-                for f in grad0._sensitivity_fields
+                for f in type(grad0)._sensitivity_fields
             }
             for f in getattr(type(grad0), "_broadcast_fields", ()):
                 updates[f] = getattr(grad0, f).copy()
-            nominal = replace(grad0, **updates)
-            object.__setattr__(self, "nominal", nominal)
-        if self.basis not in self.VALID_BASES:
-            raise ValueError(
-                f"basis must be one of {self.VALID_BASES}, got {self.basis!r}"
-            )
-        if self.basis == "f" and self.n_dof is None:
-            object.__setattr__(self, "n_dof", len(self.gradient))
-        if self.basis == "v" and self.Vh is None:
-            raise ValueError("Vh must be set when constructing State with basis='v'")
+            object.__setattr__(self, "nominal", replace(grad0, **updates))
 
-    def _require(self, name: str):
-        val = getattr(self, name)
-        if val is None:
-            raise ValueError(f"{name} must be set on the State to use this conversion")
-        return val
+    def __repr__(self) -> str:
+        tname = type(self.gradient).__name__
+        return f"Sensitivity[{tname}](basis={self.basis!r})"
 
-    def __getitem__(self, idx):
-        return self.gradient[idx]
+    # ------------------------------------------------------------------
+    # Metadata passthrough from schema
+    # ------------------------------------------------------------------
 
-    def predict(self, state: State):
+    @property
+    def use_dof(self):
+        return self.schema.use_dof
+
+    @property
+    def n_dof(self) -> int:
+        return self.schema.n_dof
+
+    @property
+    def n_active(self) -> int:
+        return self.schema.n_active
+
+    def _compatible_schema_for_basis(self, other: StateSchema, basis: Basis) -> bool:
+        """Return True if *other* is compatible with this sensitivity's schema for *basis*.
+
+        For f-basis, only ``dof_names`` and ``dof_units`` must match.
+        For x-basis, ``use_dof`` must also match.
+        For v-basis, ``Vh`` (shape and values) must additionally match.
+        """
+        if self.schema.dof_names != other.dof_names:
+            return False
+        if self.schema.dof_units != other.dof_units:
+            return False
+        if basis in ("x", "v") and not np.array_equal(self.schema.use_dof, other.use_dof):
+            return False
+        if basis == "v":
+            if self.schema.Vh is None or other.Vh is None:
+                return False
+            if self.schema.Vh.shape != other.Vh.shape:
+                return False
+            if not np.array_equal(self.schema.Vh, other.Vh):
+                return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------------------
+
+    def predict(self, state: State) -> ObsT:
         """Linear prediction: ``nominal + gradient @ state``.
 
-        *state* is a perturbation (delta) expressed in any basis.  It is
-        converted to the same basis as ``self.steps`` before combining.
+        Parameters
+        ----------
+        state : State
+            Perturbation in the same basis as this sensitivity.
 
-        Returns a new instance of the wrapped datatype.
+        Returns
+        -------
+        T
+            New instance of the wrapped observable type.
         """
-        # TODO: check that state conversion attrs match self conversion attrs
-        weights = getattr(state, self.basis).value
+        if state.basis != self.basis:
+            raise ValueError(
+                "State basis must match Sensitivity basis for prediction "
+                f"(got state.basis={state.basis!r}, sensitivity.basis={self.basis!r})"
+            )
+
+        if not self._compatible_schema_for_basis(state.schema, self.basis):
+            raise ValueError(
+                "State schema is not compatible with Sensitivity schema for "
+                f"basis={self.basis!r}"
+            )
+
+        weights = state.value
         if len(weights) != len(self.gradient):
-            raise ValueError(f"Expected {len(self.gradient)} weights, got {len(weights)}")
+            raise ValueError(
+                f"Expected {len(self.gradient)} weights for basis={self.basis!r}, "
+                f"got {len(weights)}"
+            )
 
         updates = {}
         for field_name in self.gradient._sensitivity_fields:
@@ -107,14 +186,81 @@ class Sensitivity:
 
         return replace(self.nominal, **updates)
 
+    # ------------------------------------------------------------------
+    # Basis narrowing: f → x → v only
+    # ------------------------------------------------------------------
+
+    @property
+    def f(self) -> Sensitivity[ObsT]:
+        """Sensitivity with gradient in the full-DOF (f) basis."""
+        if self.basis == "f":
+            return self
+        raise ValueError(
+            f"Reverse basis reconstruction ({self.basis!r} → 'f') is prohibited. "
+            "Basis narrowing is one-way: f → x → v."
+        )
+
+    @property
+    def x(self) -> Sensitivity[ObsT]:
+        """Sensitivity with gradient in the active-DOF (x) basis."""
+        if self.basis == "x":
+            return self
+        if self.basis == "v":
+            raise ValueError(
+                "Reverse basis reconstruction ('v' → 'x') is prohibited. "
+                "Basis narrowing is one-way: f → x → v."
+            )
+
+        # self.basis == 'f': narrow by selecting active DOFs.
+        schema = self.schema
+        updates: dict = {}
+        for field_name in type(self.gradient)._sensitivity_fields:
+            q = getattr(self.gradient, field_name)
+            updates[field_name] = q.value[schema.use_dof] * q.unit
+
+        for field_name in getattr(type(self.gradient), "_broadcast_fields", ()):
+            val = getattr(self.nominal, field_name)
+            updates[field_name] = np.broadcast_to(
+                val, (schema.n_active,) + val.shape
+            ).copy()
+
+        return replace(self, gradient=replace(self.gradient, **updates), basis="x")
+
+    @property
+    def v(self) -> Sensitivity[ObsT]:
+        """Sensitivity with gradient in the SVD-truncated (v) basis."""
+        if self.basis == "v":
+            return self
+        schema = self.schema
+        if schema.Vh is None:
+            raise ValueError("schema.Vh must be set to convert Sensitivity to 'v' basis")
+
+        x_sens = self if self.basis == "x" else self.x
+        updates: dict = {}
+        for field_name in type(x_sens.gradient)._sensitivity_fields:
+            q = getattr(x_sens.gradient, field_name)
+            updates[field_name] = np.einsum("ij,j...->i...", schema.Vh, q.value) * q.unit
+
+        for field_name in getattr(type(x_sens.gradient), "_broadcast_fields", ()):
+            val = getattr(x_sens.nominal, field_name)
+            updates[field_name] = np.broadcast_to(
+                val, (schema.n_keep,) + val.shape
+            ).copy()
+
+        return replace(x_sens, gradient=replace(x_sens.gradient, **updates), basis="v")
+
+    # ------------------------------------------------------------------
+    # Construction from finite differences
+    # ------------------------------------------------------------------
+
     @classmethod
     def from_finite_differences(
         cls,
-        nominal,
-        perturbed_list: list,
+        nominal: ObsT,
+        perturbed_list: list[ObsT],
         steps: State,
-    ) -> Sensitivity:
-        """Build a ``Sensitivity`` from nominal and perturbed observables.
+    ) -> Sensitivity[ObsT]:
+        """Build a Sensitivity from nominal and perturbed observables.
 
         Parameters
         ----------
@@ -124,24 +270,33 @@ class Sensitivity:
             One perturbed observable per DOF, in the same order as
             ``steps.value``.
         steps : State
-            Step sizes used for the finite differences.
-        """
-        n = len(perturbed_list)
+            Step sizes.  ``steps.schema`` is propagated to the returned
+            Sensitivity.
 
-        # Compute (perturbed - nominal) / step for each sensitivity field
+        Returns
+        -------
+        Sensitivity[T]
+            A new sensitivity in the same basis as ``steps``.
+        """
+        if len(perturbed_list) != len(steps.value):
+            raise ValueError(
+                "perturbed_list length must match number of step coefficients: "
+                f"got {len(perturbed_list)} vs {len(steps.value)}"
+            )
+
+        n = len(perturbed_list)
         grad_arrays: dict[str, list] = {f: [] for f in nominal._sensitivity_fields}
         for perturbed, step in zip(perturbed_list, steps.value):
             for f in nominal._sensitivity_fields:
                 diff = (getattr(perturbed, f) - getattr(nominal, f)) / step
                 grad_arrays[f].append(diff.value)
 
-        updates: dict[str, object] = {}
-        for f in nominal._sensitivity_fields:
+        updates: dict = {}
+        for f in type(nominal)._sensitivity_fields:
             unit = getattr(nominal, f).unit
             updates[f] = np.stack(grad_arrays[f]) * unit
 
-        # Broadcast ancillary array fields (e.g. vignetted for Spots)
-        for f in getattr(nominal, "_broadcast_fields", ()):
+        for f in getattr(type(nominal), "_broadcast_fields", ()):
             val = getattr(nominal, f)
             updates[f] = np.broadcast_to(val, (n,) + val.shape).copy()
 
@@ -150,17 +305,11 @@ class Sensitivity:
             nominal=nominal,
             gradient=gradient,
             basis=steps.basis,
-            use_dof=steps.use_dof,
-            n_dof=steps.n_dof,
-            Vh=steps.Vh,
+            schema=steps.schema,
         )
 
-    def __repr__(self) -> str:
-        tname = type(self.gradient).__name__
-        return f"Sensitivity[{tname}](basis={self.basis!r})"
-
     # ------------------------------------------------------------------
-    # Frame conversions
+    # Frame conversions (coordinate frame, not DOF basis)
     # ------------------------------------------------------------------
 
     @property
@@ -168,8 +317,7 @@ class Sensitivity:
         """Coordinate frame of the gradient and nominal (e.g. 'ocs', 'ccs')."""
         return self.gradient.frame
 
-    def _apply_frame(self, frame: str) -> Sensitivity:
-        """Return a new Sensitivity with gradient and nominal converted to *frame*."""
+    def _apply_frame(self, frame: str) -> Sensitivity[ObsT]:
         return replace(
             self,
             gradient=getattr(self.gradient, frame),
@@ -177,101 +325,49 @@ class Sensitivity:
         )
 
     @property
-    def ocs(self) -> Sensitivity:
-        """Sensitivity with gradient and nominal in the OCS frame."""
+    def ocs(self) -> Sensitivity[ObsT]:
         return self._apply_frame("ocs")
 
     @property
-    def ccs(self) -> Sensitivity:
-        """Sensitivity with gradient and nominal in the CCS frame."""
+    def ccs(self) -> Sensitivity[ObsT]:
         return self._apply_frame("ccs")
 
     @property
-    def dvcs(self) -> Sensitivity:
-        """Sensitivity with gradient and nominal in the DVCS frame (Spots only)."""
+    def dvcs(self) -> Sensitivity[ObsT]:
         return self._apply_frame("dvcs")
 
     @property
-    def edcs(self) -> Sensitivity:
-        """Sensitivity with gradient and nominal in the EDCS frame (Spots only)."""
+    def edcs(self) -> Sensitivity[ObsT]:
         return self._apply_frame("edcs")
 
-    def _apply_basis(self, target: str) -> "Sensitivity":
-        """Return a copy of ``self`` with ``gradient`` expressed in *target* basis.
 
-        Correctly handles observable-typed fields by operating on the raw
-        ``.value`` arrays and reassembling with ``replace()``.  Re-broadcasts
-        ancillary fields listed in ``_broadcast_fields`` (e.g. ``vignetted``
-        on ``Spots``) from ``self.nominal`` with the new leading dimension.
-        """
-        if self.basis == target:
-            return self
+def _sensitivity_to_x_matrix(sens: Sensitivity[ObsT]) -> np.ndarray:
+    """Extract a design matrix of shape ``(n_obs, n_active)`` from a Sensitivity.
 
-        # ------------------------------------------------------------------ #
-        # Helpers: convert a raw ndarray between self.basis and target        #
-        # ------------------------------------------------------------------ #
+    The input is narrowed to x-basis via ``sens = sens.x``.  This supports
+    f-basis inputs and intentionally fails for v-basis inputs per the one-way
+    basis narrowing rules.
 
-        def _to_x(arr):
-            """Convert arr from self.basis to x-basis (nactive leading dim)."""
-            if self.basis == "x":
-                return arr
-            if self.basis == "f":
-                use_dof = self._require("use_dof")
-                return arr[use_dof]
-            # "v": (nkeep, *obs) → (nactive, *obs)  via  result[j]=Σ_i Vh[i,j]*arr[i]
-            Vh = self._require("Vh")
-            return np.einsum("ij,i...->j...", Vh, arr)
+    Works for any observable type that defines ``_sensitivity_fields``.
+    For ``Sensitivity[Spots]``, vignetted rays are excluded from the rows.
+    """
+    from .spots import Spots
 
-        def _from_x(arr):
-            """Convert arr from x-basis to target basis."""
-            if target == "x":
-                return arr
-            if target == "f":
-                use_dof = self._require("use_dof")
-                n_dof = self._require("n_dof")
-                out = np.zeros((n_dof,) + arr.shape[1:], dtype=arr.dtype)
-                out[use_dof] = arr
-                return out
-            # "v": (nactive, *obs) → (nkeep, *obs)  via  result[i]=Σ_j Vh[i,j]*arr[j]
-            Vh = self._require("Vh")
-            return np.einsum("ij,j...->i...", Vh, arr)
+    sens = sens.x
+    gradient = sens.gradient
+    obs_type = type(gradient)
+    n_active = gradient.batch_shape[0]
 
-        # ------------------------------------------------------------------ #
-        # New leading dimension size                                           #
-        # ------------------------------------------------------------------ #
-        if target == "x":
-            new_n = len(self._require("use_dof"))
-        elif target == "f":
-            new_n = self._require("n_dof")
-        else:  # "v"
-            new_n = self._require("Vh").shape[0]
+    is_spots = isinstance(gradient, Spots)
+    valid = ~gradient[0].vignetted.ravel() if is_spots else None
 
-        # ------------------------------------------------------------------ #
-        # Transform each sensitivity field                                     #
-        # ------------------------------------------------------------------ #
-        updates: dict = {}
-        for f in type(self.gradient)._sensitivity_fields:
-            q = getattr(self.gradient, f)
-            updates[f] = _from_x(_to_x(q.value)) * q.unit
+    chunks = []
+    for field_name in obs_type._sensitivity_fields:
+        arr = getattr(gradient, field_name)
+        arr = arr.value if hasattr(arr, "value") else np.asarray(arr, dtype=float)
+        arr = arr.reshape(n_active, -1)  # (n_active, n_flat_obs)
+        if valid is not None:
+            arr = arr[:, valid]
+        chunks.append(arr)
 
-        # Re-broadcast ancillary fields (e.g. vignetted on Spots) from nominal
-        for f in getattr(type(self.gradient), "_broadcast_fields", ()):
-            val = getattr(self.nominal, f)
-            updates[f] = np.broadcast_to(val, (new_n,) + val.shape).copy()
-
-        return replace(self, gradient=replace(self.gradient, **updates), basis=target)
-
-    @property
-    def x(self) -> "Sensitivity":
-        """Sensitivity with gradient in the active-DOF (x) basis."""
-        return self._apply_basis("x")
-
-    @property
-    def f(self) -> "Sensitivity":
-        """Sensitivity with gradient in the full-DOF (f) basis."""
-        return self._apply_basis("f")
-
-    @property
-    def v(self) -> "Sensitivity":
-        """Sensitivity with gradient in the SVD-truncated (v) basis."""
-        return self._apply_basis("v")
+    return np.concatenate(chunks, axis=1).T  # (n_obs, n_active)

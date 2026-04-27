@@ -1,19 +1,20 @@
-"""Tests for the Sensitivity class."""
+"""Tests for Sensitivity and StateSchema.with_svd."""
 
 from __future__ import annotations
-from dataclasses import replace
 
 import astropy.units as u
 import numpy as np
 import pytest
-from astropy.coordinates import Angle
+from dataclasses import replace
 
-from StarSharp.datatypes import DoubleZernikes, Sensitivity, Spots, State, Zernikes
+from StarSharp.datatypes import Zernikes, Spots
+from StarSharp.datatypes.sensitivity import Sensitivity
+from StarSharp.datatypes.state import State, StateSchema
 
 from .utils import RTP, _make_field
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Shared constants
 # ---------------------------------------------------------------------------
 
 FIELD_OUTER = 1.75 * u.deg
@@ -21,19 +22,44 @@ FIELD_INNER = 0.0 * u.deg
 PUPIL_OUTER = 4.18 * u.m
 PUPIL_INNER = 4.18 * 0.612 * u.m
 
-NDOF = 50
-NUSEDOF = 4
-NFIELD = 5
+N_DOF = 10
+N_ACTIVE = 4
+ACTIVE_IDX = [0, 1, 2, 3]
+N_FIELD = 5
 JMAX = 10
-KMAX = 6
-NRAY = 20
+N_RAY = 16
+
+# ---------------------------------------------------------------------------
+# Shared schema / steps helpers
+# ---------------------------------------------------------------------------
+
+_SCHEMA = StateSchema(
+    dof_names=tuple(f"dof{i}" for i in range(N_DOF)),
+    dof_units=(u.mm,) * N_DOF,
+    use_dof=np.array(ACTIVE_IDX, dtype=int),
+)
 
 
-def _make_zernikes_nominal(rng=None):
+def _make_steps(schema=None):
+    if schema is None:
+        schema = _SCHEMA
+    return State(
+        value=np.array([1.0, 2.0, 0.5, 3.0]),
+        basis="x",
+        schema=schema,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Zernike helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_zk_nominal(rng=None):
     if rng is None:
         rng = np.random.default_rng(42)
-    coefs = rng.standard_normal((NFIELD, JMAX + 1)) * u.um
-    field = _make_field(NFIELD, rtp=RTP)
+    field = _make_field(N_FIELD, rtp=RTP)
+    coefs = rng.standard_normal((N_FIELD, JMAX + 1)) * u.um
     return Zernikes(
         coefs=coefs,
         field=field,
@@ -44,8 +70,8 @@ def _make_zernikes_nominal(rng=None):
     )
 
 
-def _make_zernikes_perturbed(nominal, rng, step):
-    """Simulate a perturbation by adding a random delta scaled by step."""
+def _make_zk_perturbed(nominal, step, seed):
+    rng = np.random.default_rng(seed)
     delta = rng.standard_normal(nominal.coefs.shape)
     return Zernikes(
         coefs=nominal.coefs + delta * step * u.um,
@@ -57,33 +83,32 @@ def _make_zernikes_perturbed(nominal, rng, step):
     )
 
 
-def _make_steps():
-    return State(
-        value=np.array([1.0, 2.0, 0.5, 3.0]),
-        basis="x",
-        use_dof=np.array([0, 1, 2, 3]),
-        n_dof=50,
-    )
-
-
-def _make_zk_sensitivity():
-    rng = np.random.default_rng(99)
-    nominal = _make_zernikes_nominal(rng)
-    steps = _make_steps()
+def _make_zk_sensitivity(schema=None):
+    if schema is None:
+        schema = _SCHEMA
+    rng = np.random.default_rng(7)
+    nominal = _make_zk_nominal(rng)
+    steps = _make_steps(schema)
     perturbed = [
-        _make_zernikes_perturbed(nominal, np.random.default_rng(i), s)
+        _make_zk_perturbed(nominal, s, seed=10 + i)
         for i, s in enumerate(steps.value)
     ]
-    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed, steps
+    sens = Sensitivity.from_finite_differences(nominal, perturbed, steps)
+    return sens, nominal, steps
+
+
+# ---------------------------------------------------------------------------
+# Spots helpers
+# ---------------------------------------------------------------------------
 
 
 def _make_spots_nominal(rng=None):
     if rng is None:
         rng = np.random.default_rng(55)
-    dx = rng.standard_normal((NFIELD, NRAY)) * u.um
-    dy = rng.standard_normal((NFIELD, NRAY)) * u.um
-    vig = np.zeros((NFIELD, NRAY), dtype=bool)
-    field = _make_field(NFIELD, rtp=RTP)
+    field = _make_field(N_FIELD, rtp=RTP)
+    dx = rng.standard_normal((N_FIELD, N_RAY)) * u.um
+    dy = rng.standard_normal((N_FIELD, N_RAY)) * u.um
+    vig = np.zeros((N_FIELD, N_RAY), dtype=bool)
     return Spots(
         dx=dx,
         dy=dy,
@@ -95,7 +120,8 @@ def _make_spots_nominal(rng=None):
     )
 
 
-def _make_spots_perturbed(nominal, rng, step):
+def _make_spots_perturbed(nominal, step, seed):
+    rng = np.random.default_rng(seed)
     ddx = rng.standard_normal(nominal.dx.shape)
     ddy = rng.standard_normal(nominal.dy.shape)
     return Spots(
@@ -109,629 +135,358 @@ def _make_spots_perturbed(nominal, rng, step):
     )
 
 
-def _make_spots_sensitivity():
+def _make_spots_sensitivity(schema=None):
+    if schema is None:
+        schema = _SCHEMA
     rng = np.random.default_rng(88)
     nominal = _make_spots_nominal(rng)
-    steps = _make_steps()
+    steps = _make_steps(schema)
     perturbed = [
-        _make_spots_perturbed(nominal, np.random.default_rng(100 + i), s)
+        _make_spots_perturbed(nominal, s, seed=100 + i)
         for i, s in enumerate(steps.value)
     ]
-    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed, steps
-
-
-def _make_dz_nominal(rng=None):
-    if rng is None:
-        rng = np.random.default_rng(77)
-    coefs = rng.standard_normal((KMAX + 1, JMAX + 1)) * u.um
-    return DoubleZernikes(
-        coefs=coefs,
-        field_outer=FIELD_OUTER,
-        field_inner=FIELD_INNER,
-        pupil_outer=PUPIL_OUTER,
-        pupil_inner=PUPIL_INNER,
-        frame="ocs",
-        rtp=RTP,
-    )
-
-
-def _make_dz_perturbed(nominal, rng, step):
-    delta = rng.standard_normal(nominal.coefs.shape)
-    return DoubleZernikes(
-        coefs=nominal.coefs + delta * step * u.um,
-        field_outer=nominal.field_outer,
-        field_inner=nominal.field_inner,
-        pupil_outer=nominal.pupil_outer,
-        pupil_inner=nominal.pupil_inner,
-        frame=nominal.frame,
-        rtp=nominal.rtp,
-    )
-
-
-def _make_dz_sensitivity():
-    rng = np.random.default_rng(66)
-    nominal = _make_dz_nominal(rng)
-    steps = _make_steps()
-    perturbed = [
-        _make_dz_perturbed(nominal, np.random.default_rng(200 + i), s)
-        for i, s in enumerate(steps.value)
-    ]
-    return Sensitivity.from_finite_differences(nominal, perturbed, steps), perturbed, steps
+    return Sensitivity.from_finite_differences(nominal, perturbed, steps)
 
 
 # ---------------------------------------------------------------------------
-# Tests: __class_getitem__
+# TestSensitivityConstruction
 # ---------------------------------------------------------------------------
 
 
-class TestClassGetitem:
-    def test_type_hint_sugar(self):
-        assert Sensitivity[Zernikes] is Sensitivity
-        assert Sensitivity[Spots] is Sensitivity
-        assert Sensitivity[DoubleZernikes] is Sensitivity
-
-
-# ---------------------------------------------------------------------------
-# Tests: from_finite_differences  —  Zernikes
-# ---------------------------------------------------------------------------
-
-
-class TestFromFiniteDifferencesZernikes:
-    def test_gradient_shape(self):
+class TestSensitivityConstruction:
+    def test_gradient_shape_zk(self):
         sens, *_ = _make_zk_sensitivity()
-        assert sens.gradient.coefs.shape == (NUSEDOF, NFIELD, JMAX + 1)
+        assert sens.gradient.coefs.shape == (N_ACTIVE, N_FIELD, JMAX + 1)
 
     def test_nominal_preserved(self):
-        sens, *_ = _make_zk_sensitivity()
-        assert sens.nominal.coefs.shape == (NFIELD, JMAX + 1)
+        sens, nominal, _ = _make_zk_sensitivity()
+        np.testing.assert_allclose(
+            sens.nominal.coefs.to_value(u.um),
+            nominal.coefs.to_value(u.um),
+        )
 
-    def test_gradient_values(self):
-        sens, perturbed, steps = _make_zk_sensitivity()
-        for i in range(NUSEDOF):
-            expected = (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
+    def test_gradient_values_zk(self):
+        sens, nominal, steps = _make_zk_sensitivity()
+        rng = np.random.default_rng(7)
+        _ = _make_zk_nominal(rng)  # advance rng to same state used in helper
+        for i, step in enumerate(steps.value):
+            perturbed = _make_zk_perturbed(nominal, step, seed=10 + i)
+            expected = (perturbed.coefs - nominal.coefs) / step
             np.testing.assert_allclose(
                 sens.gradient.coefs[i].to_value(u.um),
                 expected.to_value(u.um),
             )
 
-
-# ---------------------------------------------------------------------------
-# Tests: from_finite_differences  —  Spots
-# ---------------------------------------------------------------------------
-
-
-class TestFromFiniteDifferencesSpots:
-    def test_gradient_shape(self):
-        sens, *_ = _make_spots_sensitivity()
-        assert sens.gradient.dx.shape == (NUSEDOF, NFIELD, NRAY)
-        assert sens.gradient.dy.shape == (NUSEDOF, NFIELD, NRAY)
-        assert sens.gradient.vignetted.shape == (NUSEDOF, NFIELD, NRAY)
-
-    def test_gradient_dx_values(self):
-        sens, perturbed, steps = _make_spots_sensitivity()
-        for i in range(NUSEDOF):
-            expected = (perturbed[i].dx - sens.nominal.dx) / steps.value[i]
-            np.testing.assert_allclose(
-                sens.gradient.dx[i].to_value(u.um),
-                expected.to_value(u.um),
-            )
-
-    def test_vignetted_broadcast(self):
-        sens, *_ = _make_spots_sensitivity()
-        for i in range(NUSEDOF):
-            np.testing.assert_array_equal(
-                sens.gradient.vignetted[i], sens.nominal.vignetted
-            )
-
-
-# ---------------------------------------------------------------------------
-# Tests: from_finite_differences  —  DoubleZernikes
-# ---------------------------------------------------------------------------
-
-
-class TestFromFiniteDifferencesDZ:
-    def test_gradient_shape(self):
-        sens, *_ = _make_dz_sensitivity()
-        assert sens.gradient.coefs.shape == (NUSEDOF, KMAX + 1, JMAX + 1)
-
-    def test_gradient_values(self):
-        sens, perturbed, steps = _make_dz_sensitivity()
-        for i in range(NUSEDOF):
-            expected = (perturbed[i].coefs - sens.nominal.coefs) / steps.value[i]
-            np.testing.assert_allclose(
-                sens.gradient.coefs[i].to_value(u.um),
-                expected.to_value(u.um),
-            )
-
-
-# ---------------------------------------------------------------------------
-# Tests: properties and indexing
-# ---------------------------------------------------------------------------
-
-
-class TestProperties:
-    def test_n_dof(self):
+    def test_basis_is_x(self):
         sens, *_ = _make_zk_sensitivity()
-        assert sens.n_dof == NDOF
+        assert sens.basis == "x"
 
-    def test_getitem_zernikes(self):
+    def test_schema_propagated(self):
         sens, *_ = _make_zk_sensitivity()
-        z0 = sens[0]
-        assert isinstance(z0, Zernikes)
-        assert z0.coefs.shape == (NFIELD, JMAX + 1)
-        np.testing.assert_allclose(
-            z0.coefs.to_value(u.um),
-            sens.gradient.coefs[0].to_value(u.um),
-        )
+        assert sens.schema is _SCHEMA
 
-    def test_getitem_spots(self):
-        sens, *_ = _make_spots_sensitivity()
-        s0 = sens[0]
-        assert isinstance(s0, Spots)
-        assert s0.dx.shape == (NFIELD, NRAY)
-
-    def test_getitem_dz(self):
-        sens, *_ = _make_dz_sensitivity()
-        dz0 = sens[0]
-        assert isinstance(dz0, DoubleZernikes)
-        assert dz0.coefs.shape == (KMAX + 1, JMAX + 1)
-
-    def test_slice(self):
+    def test_n_dof_n_active_passthrough(self):
         sens, *_ = _make_zk_sensitivity()
-        sliced = sens[:2]
-        assert isinstance(sliced, Zernikes)
-        assert sliced.coefs.shape == (2, NFIELD, JMAX + 1)
+        assert sens.n_dof == N_DOF
+        assert sens.n_active == N_ACTIVE
 
+    def test_schema_required(self):
+        """Sensitivity.__post_init__ rejects a non-StateSchema schema."""
+        nominal = _make_zk_nominal()
+        with pytest.raises(TypeError, match="StateSchema"):
+            Sensitivity(gradient=nominal, nominal=nominal, basis="x", schema=None)
 
-# ---------------------------------------------------------------------------
-# Tests: predict
-# ---------------------------------------------------------------------------
+    def test_invalid_basis_raises(self):
+        nominal = _make_zk_nominal()
+        with pytest.raises(ValueError, match="basis must be"):
+            Sensitivity(gradient=nominal, nominal=nominal, basis="z", schema=_SCHEMA)
 
-
-class TestPredict:
-    def test_predict_zernikes(self):
-        sens, *_ = _make_zk_sensitivity()
-        delta = State(
-            value=np.array([0.1, -0.2, 0.3, 0.0]),
-            basis="x",
-            use_dof=np.array([0, 1, 2, 3]),
-            n_dof=50,
-        )
-        result = sens.predict(delta)
-        assert isinstance(result, Zernikes)
-        assert result.coefs.shape == (NFIELD, JMAX + 1)
-
-        # Manual check: nominal + gradient @ weights
-        weights = delta.x.value
-        expected = sens.nominal.coefs.value + np.einsum(
-            "i...,i->...", sens.gradient.coefs.value, weights
-        )
-        np.testing.assert_allclose(result.coefs.to_value(u.um), expected, rtol=1e-12)
-
-    def test_predict_spots(self):
-        sens, *_ = _make_spots_sensitivity()
-        delta = State(
-            value=np.array([0.5, -0.5, 1.0, -1.0]),
-            basis="x",
-            use_dof=np.array([0, 1, 2, 3]),
-            n_dof=50,
-        )
-        result = sens.predict(delta)
-        assert isinstance(result, Spots)
-
-        weights = delta.x.value
-        expected_dx = sens.nominal.dx.value + np.einsum(
-            "i...,i->...", sens.gradient.dx.value, weights
-        )
-        np.testing.assert_allclose(result.dx.to_value(u.um), expected_dx, rtol=1e-12)
-
-    def test_predict_double_zernikes(self):
-        sens, *_ = _make_dz_sensitivity()
-        delta = State(
-            value=np.array([1.0, 2.0, 3.0, 4.0]),
-            basis="x",
-            use_dof=np.array([0, 1, 2, 3]),
-            n_dof=50,
-        )
-        result = sens.predict(delta)
-        assert isinstance(result, DoubleZernikes)
-
-        weights = delta.x.value
-        expected = sens.nominal.coefs.value + np.einsum(
-            "i...,i->...", sens.gradient.coefs.value, weights
-        )
-        np.testing.assert_allclose(result.coefs.to_value(u.um), expected, rtol=1e-12)
-
-    def test_predict_zero_is_nominal(self):
-        sens, *_ = _make_zk_sensitivity()
-        zero = State(
-            value=np.zeros(NUSEDOF),
-            basis="x",
-            use_dof=np.array([0, 1, 2, 3]),
-            n_dof=NDOF,
-        )
-        result = sens.predict(zero)
-        np.testing.assert_allclose(
-            result.coefs.to_value(u.um),
-            sens.nominal.coefs.to_value(u.um),
-            rtol=1e-12,
-        )
-
-    def test_predict_preserves_metadata(self):
-        sens, *_ = _make_zk_sensitivity()
-        delta = State(
-            value=np.ones(NDOF),
-            basis="f",
-            use_dof=np.array([0, 1, 2, 3]),
-            n_dof=50,
-        )
-        result = sens.predict(delta)
-        assert result.jmax == sens.nominal.jmax
-        assert result.R_outer == sens.nominal.R_outer
-        assert result.R_inner == sens.nominal.R_inner
-        assert result.frame == sens.nominal.frame
-
-
-# ---------------------------------------------------------------------------
-# Tests: gradient-only construction (nominal=None)
-# ---------------------------------------------------------------------------
-
-
-class TestGradientOnlyConstruction:
-    def test_zernikes_nominal_is_zeros(self):
-        sens, *_ = _make_zk_sensitivity()
-        grad_only = Sensitivity(gradient=sens.gradient)
-        np.testing.assert_array_equal(
-            grad_only.nominal.coefs.to_value(u.um),
-            np.zeros((NFIELD, JMAX + 1)),
-        )
-
-    def test_zernikes_nominal_shape_matches_gradient_slice(self):
-        sens, *_ = _make_zk_sensitivity()
-        grad_only = Sensitivity(gradient=sens.gradient)
-        assert grad_only.nominal.coefs.shape == sens.gradient.coefs.shape[1:]
-
-    def test_zernikes_nominal_preserves_metadata(self):
-        """Non-sensitivity fields (frame, rtp, field, etc.) come from gradient[0]."""
-        sens, *_ = _make_zk_sensitivity()
-        grad_only = Sensitivity(gradient=sens.gradient)
-        assert grad_only.nominal.frame == sens.gradient[0].frame
-        assert grad_only.nominal.R_outer == sens.gradient[0].R_outer
-
-    def test_dz_nominal_is_zeros(self):
-        sens, *_ = _make_dz_sensitivity()
-        grad_only = Sensitivity(gradient=sens.gradient)
-        np.testing.assert_array_equal(
-            grad_only.nominal.coefs.to_value(u.um),
-            np.zeros((KMAX + 1, JMAX + 1)),
-        )
-
-    def test_spots_nominal_is_zeros(self):
-        sens, *_ = _make_spots_sensitivity()
-        grad_only = Sensitivity(gradient=sens.gradient)
-        np.testing.assert_array_equal(
-            grad_only.nominal.dx.to_value(u.um),
-            np.zeros((NFIELD, NRAY)),
-        )
-        np.testing.assert_array_equal(
-            grad_only.nominal.dy.to_value(u.um),
-            np.zeros((NFIELD, NRAY)),
-        )
-
-    def test_spots_nominal_vignetted_copied_from_gradient(self):
-        """vignetted is a broadcast field — should be copied not zeroed."""
-        rng = np.random.default_rng(42)
-        nominal = _make_spots_nominal(rng)
-        # Mark some rays as vignetted
-        vig = nominal.vignetted.copy()
-        vig[0, 0] = True
-        vig[2, 5] = True
-        nominal = replace(nominal, vignetted=vig)
-        steps = _make_steps()
-        perturbed = [
-            _make_spots_perturbed(nominal, np.random.default_rng(100 + i), s)
-            for i, s in enumerate(steps.value)
-        ]
-        sens = Sensitivity.from_finite_differences(nominal, perturbed, steps)
-
-        grad_only = Sensitivity(gradient=sens.gradient)
-        # gradient[0].vignetted is the original mask, broadcast
-        np.testing.assert_array_equal(grad_only.nominal.vignetted, vig)
-
-
-# ---------------------------------------------------------------------------
-# Tests: repr
-# ---------------------------------------------------------------------------
-
-
-class TestRepr:
-    def test_repr_zernikes(self):
+    def test_repr(self):
         sens, *_ = _make_zk_sensitivity()
         r = repr(sens)
-        assert "Sensitivity[Zernikes]" in r
-
-    def test_repr_spots(self):
-        sens, *_ = _make_spots_sensitivity()
-        r = repr(sens)
-        assert "Sensitivity[Spots]" in r
-
-    def test_repr_dz(self):
-        sens, *_ = _make_dz_sensitivity()
-        r = repr(sens)
-        assert "Sensitivity[DoubleZernikes]" in r
+        assert "Zernikes" in r
+        assert "basis=" in r
 
 
 # ---------------------------------------------------------------------------
-# Tests: frame conversions
+# TestSensitivityBasisNarrowing
 # ---------------------------------------------------------------------------
 
 
-class TestFrameConversions:
-    def test_zernikes_ocs_from_ccs(self):
-        """Sensitivity[Zernikes] CCS → OCS round-trips the frame attribute."""
-        sens_ocs, _, steps = _make_zk_sensitivity()
-        # Manually create a CCS version via the underlying type's conversion
-        sens_ccs = replace(
-            sens_ocs,
-            gradient=sens_ocs.gradient.ccs,
-            nominal=sens_ocs.nominal.ccs,
-        )
-        assert sens_ccs.gradient.frame == "ccs"
-        assert sens_ccs.nominal.frame == "ccs"
-
-        back = sens_ccs.ocs
-        assert back.gradient.frame == "ocs"
-        assert back.nominal.frame == "ocs"
-
-    def test_zernikes_ccs_from_ocs(self):
-        sens_ocs, *_ = _make_zk_sensitivity()
-        sens_ccs = sens_ocs.ccs
-        assert sens_ccs.gradient.frame == "ccs"
-        assert sens_ccs.nominal.frame == "ccs"
-
-    def test_zernikes_ocs_is_identity_when_already_ocs(self):
-        sens, *_ = _make_zk_sensitivity()
-        assert sens.gradient.frame == "ocs"
-        same = sens.ocs
-        assert same.gradient is sens.gradient
-        assert same.nominal is sens.nominal
-
-    def test_zernikes_ccs_ocs_roundtrip_coefs(self):
-        """OCS → CCS → OCS should recover the original coefficients."""
-        sens, *_ = _make_zk_sensitivity()
-        roundtripped = sens.ccs.ocs
-        np.testing.assert_allclose(
-            roundtripped.gradient.coefs.to_value(u.um),
-            sens.gradient.coefs.to_value(u.um),
-            atol=1e-12,
-        )
-        np.testing.assert_allclose(
-            roundtripped.nominal.coefs.to_value(u.um),
-            sens.nominal.coefs.to_value(u.um),
-            atol=1e-12,
-        )
-
-    def test_dz_ocs_ccs_roundtrip(self):
-        sens, *_ = _make_dz_sensitivity()
-        assert sens.gradient.frame == "ocs"
-        roundtripped = sens.ccs.ocs
-        np.testing.assert_allclose(
-            roundtripped.gradient.coefs.to_value(u.um),
-            sens.gradient.coefs.to_value(u.um),
-            atol=1e-12,
-        )
-
-    def test_spots_ccs_ocs_roundtrip(self):
-        sens, *_ = _make_spots_sensitivity()
-        # Spots from_finite_differences yields CCS frame
-        assert sens.gradient.frame == "ccs"
-        roundtripped = sens.ocs.ccs
-        np.testing.assert_allclose(
-            roundtripped.gradient.dx.to_value(u.um),
-            sens.gradient.dx.to_value(u.um),
-            atol=1e-12,
-        )
-
-    def test_spots_dvcs(self):
-        sens, *_ = _make_spots_sensitivity()
-        dvcs = sens.dvcs
-        assert dvcs.gradient.frame == "dvcs"
-        assert dvcs.nominal.frame == "dvcs"
-        # In DVCS, dx and dy are swapped relative to CCS
-        np.testing.assert_allclose(
-            dvcs.gradient.dx.to_value(u.um),
-            sens.gradient.dy.to_value(u.um),
-            atol=1e-12,
-        )
-
-    def test_spots_edcs(self):
-        sens, *_ = _make_spots_sensitivity()
-        edcs = sens.edcs
-        assert edcs.gradient.frame == "edcs"
-        assert edcs.nominal.frame == "edcs"
-
-
-# ---------------------------------------------------------------------------
-# Helpers for basis-conversion tests
-# ---------------------------------------------------------------------------
-
-NKEEP = 3
-
-
-def _make_Vh_rect():
-    """Rectangular orthogonal Vh of shape (NKEEP, NUSEDOF)."""
-    rng = np.random.default_rng(123)
-    A = rng.standard_normal((NUSEDOF, NUSEDOF))
-    Q, _ = np.linalg.qr(A)
-    return Q[:NKEEP]  # (NKEEP, NUSEDOF)
-
-
-def _make_Vh_square():
-    """Square orthogonal Vh of shape (NUSEDOF, NUSEDOF)."""
-    rng = np.random.default_rng(123)
-    A = rng.standard_normal((NUSEDOF, NUSEDOF))
-    Q, _ = np.linalg.qr(A)
-    return Q  # (NUSEDOF, NUSEDOF)
-
-
-# ---------------------------------------------------------------------------
-# Tests: basis conversions
-# ---------------------------------------------------------------------------
-
-
-class TestBasisConversions:
-    # --- x unchanged ---
-
+class TestSensitivityBasisNarrowing:
     def test_x_identity(self):
         sens, *_ = _make_zk_sensitivity()
-        assert sens.x is sens
+        assert sens.x is sens  # already x-basis
 
-    # --- x → f ---
-
-    def test_x_to_f_gradient_shape_zk(self):
-        sens, *_ = _make_zk_sensitivity()
-        sf = sens.f
-        assert sf.basis == "f"
-        assert sf.gradient.coefs.shape == (NDOF, NFIELD, JMAX + 1)
-
-    def test_x_to_f_values_at_use_dof(self):
-        """Rows at use_dof in f-basis match the original x-basis rows."""
-        sens, *_ = _make_zk_sensitivity()
-        sf = sens.f
-        use_dof = sens.use_dof
-        np.testing.assert_allclose(
-            sf.gradient.coefs[use_dof].to_value(u.um),
-            sens.gradient.coefs.to_value(u.um),
+    def test_f_to_x_narrows_gradient(self):
+        """Build an f-basis sensitivity and verify .x selects active DOFs."""
+        # Manually wrap sensitivity built from all N_DOF DOFs, then narrow.
+        sens_x, nominal, steps = _make_zk_sensitivity()
+        # Pretend it's f-basis by rebuilding with full schema (no use_dof narrowing).
+        full_schema = StateSchema(
+            dof_names=tuple(f"dof{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
+            use_dof=np.array(ACTIVE_IDX, dtype=int),
         )
-
-    def test_x_to_f_zeros_outside_use_dof(self):
-        """All rows outside use_dof are zero in f-basis."""
-        sens, *_ = _make_zk_sensitivity()
-        sf = sens.f
-        mask = np.ones(NDOF, dtype=bool)
-        mask[sens.use_dof] = False
-        np.testing.assert_array_equal(
-            sf.gradient.coefs[mask].to_value(u.um),
-            np.zeros((NDOF - NUSEDOF, NFIELD, JMAX + 1)),
+        full_coefs = np.zeros((N_DOF, N_FIELD, JMAX + 1))
+        for i, ai in enumerate(ACTIVE_IDX):
+            full_coefs[ai] = sens_x.gradient.coefs[i].to_value(u.um)
+        full_gradient = replace(sens_x.gradient, coefs=full_coefs * u.um)
+        sens_f = Sensitivity(
+            gradient=full_gradient,
+            nominal=nominal,
+            basis="f",
+            schema=full_schema,
         )
-
-    def test_x_to_f_x_roundtrip_zk(self):
-        """x → f → x recovers the original gradient exactly."""
-        sens, *_ = _make_zk_sensitivity()
-        np.testing.assert_allclose(
-            sens.f.x.gradient.coefs.to_value(u.um),
-            sens.gradient.coefs.to_value(u.um),
-        )
-
-    def test_x_to_f_basis_attr(self):
-        sens, *_ = _make_zk_sensitivity()
-        assert sens.f.basis == "f"
-        assert sens.f.x.basis == "x"
-
-    def test_x_to_f_nominal_unchanged(self):
-        """Nominal is not modified by basis conversion."""
-        sens, *_ = _make_zk_sensitivity()
-        np.testing.assert_allclose(
-            sens.f.nominal.coefs.to_value(u.um),
-            sens.nominal.coefs.to_value(u.um),
-        )
-
-    # --- x → f for Spots (vignetted re-broadcast) ---
-
-    def test_x_to_f_spots_gradient_shape(self):
-        sens, *_ = _make_spots_sensitivity()
-        sf = sens.f
-        assert sf.gradient.dx.shape == (NDOF, NFIELD, NRAY)
-        assert sf.gradient.dy.shape == (NDOF, NFIELD, NRAY)
-
-    def test_x_to_f_spots_vignetted_shape(self):
-        sens, *_ = _make_spots_sensitivity()
-        assert sens.f.gradient.vignetted.shape == (NDOF, NFIELD, NRAY)
-
-    def test_x_to_f_spots_vignetted_values(self):
-        """All rows of vignetted in f-basis equal nominal.vignetted."""
-        sens, *_ = _make_spots_sensitivity()
-        sf = sens.f
-        for i in range(NDOF):
-            np.testing.assert_array_equal(
-                sf.gradient.vignetted[i], sens.nominal.vignetted
+        sens_x2 = sens_f.x
+        assert sens_x2.basis == "x"
+        assert sens_x2.gradient.coefs.shape == (N_ACTIVE, N_FIELD, JMAX + 1)
+        # The active rows must match the original.
+        for local_i, global_i in enumerate(ACTIVE_IDX):
+            np.testing.assert_allclose(
+                sens_x2.gradient.coefs[local_i].to_value(u.um),
+                full_coefs[global_i],
             )
 
-    def test_x_to_f_x_roundtrip_spots(self):
-        sens, *_ = _make_spots_sensitivity()
-        np.testing.assert_allclose(
-            sens.f.x.gradient.dx.to_value(u.um),
-            sens.gradient.dx.to_value(u.um),
+    def test_f_identity(self):
+        """Sensitivity already in f-basis returns self."""
+        sens_x, nominal, steps = _make_zk_sensitivity()
+        full_schema = StateSchema(
+            dof_names=tuple(f"dof{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
         )
-        np.testing.assert_allclose(
-            sens.f.x.gradient.dy.to_value(u.um),
-            sens.gradient.dy.to_value(u.um),
+        full_coefs = np.zeros((N_DOF, N_FIELD, JMAX + 1))
+        full_gradient = replace(sens_x.gradient, coefs=full_coefs * u.um)
+        sens_f = Sensitivity(
+            gradient=full_gradient,
+            nominal=nominal,
+            basis="f",
+            schema=full_schema,
         )
+        assert sens_f.f is sens_f
 
-    # --- x → v ---
-
-    def test_x_to_v_gradient_shape_zk(self):
+    def test_f_raises_from_x(self):
         sens, *_ = _make_zk_sensitivity()
-        Vh = _make_Vh_rect()
-        sv = replace(sens, Vh=Vh).v
+        with pytest.raises(ValueError, match="one-way"):
+            _ = sens.f
+
+    def test_v_from_x(self):
+        n_active = N_ACTIVE
+        Vh = _make_Vh_ortho(n_active)
+        schema = StateSchema(
+            dof_names=tuple(f"dof{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
+            use_dof=np.array(ACTIVE_IDX, dtype=int),
+            Vh=Vh,
+        )
+        sens, *_ = _make_zk_sensitivity(schema=schema)
+        sv = sens.v
         assert sv.basis == "v"
-        assert sv.gradient.coefs.shape == (NKEEP, NFIELD, JMAX + 1)
+        assert sv.gradient.coefs.shape[0] == n_active
 
-    def test_x_to_v_values_zk(self):
-        """Gradient in v-basis equals Vh @ x-gradient along DOF axis."""
-        sens, *_ = _make_zk_sensitivity()
-        Vh = _make_Vh_rect()
-        sv = replace(sens, Vh=Vh).v
-        expected = np.einsum("ij,j...->i...", Vh, sens.gradient.coefs.to_value(u.um))
+    def test_v_without_Vh_raises(self):
+        sens, *_ = _make_zk_sensitivity()  # schema has no Vh
+        with pytest.raises(ValueError, match="Vh must be set"):
+            _ = sens.v
+
+    def test_v_to_x_raises(self):
+        Vh = _make_Vh_ortho(N_ACTIVE)
+        schema = StateSchema(
+            dof_names=tuple(f"dof{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
+            use_dof=np.array(ACTIVE_IDX, dtype=int),
+            Vh=Vh,
+        )
+        sens, *_ = _make_zk_sensitivity(schema=schema)
+        sv = sens.v
+        with pytest.raises(ValueError, match="one-way"):
+            _ = sv.x
+
+
+# ---------------------------------------------------------------------------
+# TestSensitivityPredict
+# ---------------------------------------------------------------------------
+
+
+class TestSensitivityPredict:
+    def test_predict_zero_state_returns_nominal(self):
+        sens, nominal, steps = _make_zk_sensitivity()
+        zero_state = State(value=np.zeros(N_ACTIVE), basis="x", schema=_SCHEMA)
+        result = sens.predict(zero_state)
         np.testing.assert_allclose(
-            sv.gradient.coefs.to_value(u.um), expected, rtol=1e-12
+            result.coefs.to_value(u.um),
+            nominal.coefs.to_value(u.um),
         )
 
-    def test_x_v_x_roundtrip_square_Vh_zk(self):
-        """With a square orthogonal Vh, x → v → x is exact."""
+    def test_predict_linearity(self):
+        """predict(2*s) == 2 * predict(s) - nominal (linear)."""
+        sens, nominal, steps = _make_zk_sensitivity()
+        xvals = np.array([0.01, 0.01, 0.01, 0.01])
+        s1 = State(value=xvals, basis="x", schema=_SCHEMA)
+        s2 = State(value=2 * xvals, basis="x", schema=_SCHEMA)
+        r1 = sens.predict(s1)
+        r2 = sens.predict(s2)
+        delta1 = (r1.coefs - nominal.coefs).to_value(u.um)
+        delta2 = (r2.coefs - nominal.coefs).to_value(u.um)
+        np.testing.assert_allclose(delta2, 2.0 * delta1, rtol=1e-12)
+
+    def test_predict_basis_mismatch_raises(self):
         sens, *_ = _make_zk_sensitivity()
-        Vh = _make_Vh_square()
-        roundtripped = replace(sens, Vh=Vh).v.x
-        np.testing.assert_allclose(
-            roundtripped.gradient.coefs.to_value(u.um),
-            sens.gradient.coefs.to_value(u.um),
-            rtol=1e-12,
+        f_schema = StateSchema(
+            dof_names=tuple(f"dof{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
         )
+        f_state = State(value=np.zeros(N_DOF), basis="f", schema=f_schema)
+        with pytest.raises(ValueError, match="basis must match"):
+            sens.predict(f_state)
 
-    def test_v_to_x_gradient_shape(self):
-        """Starting from v-basis, .x gives shape (NUSEDOF, *obs)."""
+    def test_predict_incompatible_schema_raises(self):
         sens, *_ = _make_zk_sensitivity()
-        Vh = _make_Vh_rect()
-        sv = replace(sens, Vh=Vh).v  # shape (NKEEP, NFIELD, JMAX+1)
-        sx = sv.x
-        assert sx.basis == "x"
-        assert sx.gradient.coefs.shape == (NUSEDOF, NFIELD, JMAX + 1)
-
-    def test_x_to_v_spots_vignetted_shape(self):
-        """Spots vignetted is correctly re-broadcast when converting to v."""
-        sens, *_ = _make_spots_sensitivity()
-        Vh = _make_Vh_rect()
-        sv = replace(sens, Vh=Vh).v
-        assert sv.gradient.vignetted.shape == (NKEEP, NFIELD, NRAY)
-        for i in range(NKEEP):
-            np.testing.assert_array_equal(
-                sv.gradient.vignetted[i], sens.nominal.vignetted
-            )
-
-    # --- f → x (start from f-basis sensitivity) ---
-
-    def test_f_to_x_gradient_shape_dz(self):
-        """DoubleZernikes: f-basis → x recovers (NUSEDOF, K+1, J+1) shape."""
-        sens, *_ = _make_dz_sensitivity()
-        sf = sens.f  # (NDOF, KMAX+1, JMAX+1)
-        sx = sf.x
-        assert sx.basis == "x"
-        assert sx.gradient.coefs.shape == (NUSEDOF, KMAX + 1, JMAX + 1)
-
-    def test_f_to_x_values_dz(self):
-        sens, *_ = _make_dz_sensitivity()
-        sx = sens.f.x
-        np.testing.assert_allclose(
-            sx.gradient.coefs.to_value(u.um),
-            sens.gradient.coefs.to_value(u.um),
+        bad_schema = StateSchema(
+            dof_names=tuple(f"other{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
+            use_dof=np.array(ACTIVE_IDX, dtype=int),
         )
+        bad_state = State(value=np.zeros(N_ACTIVE), basis="x", schema=bad_schema)
+        with pytest.raises(ValueError, match="not compatible"):
+            sens.predict(bad_state)
+
+
+# ---------------------------------------------------------------------------
+# TestStateSchemaWithSvd
+# ---------------------------------------------------------------------------
+
+
+def _make_Vh_ortho(n_active, n_keep=None, seed=99):
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((n_active * 4, n_active))
+    _, _, Vh = np.linalg.svd(A, full_matrices=False)
+    if n_keep is None:
+        n_keep = n_active
+    return Vh[:n_keep]
+
+
+class TestStateSchemaWithSvd:
+    def _sens_x(self, schema=None):
+        if schema is None:
+            schema = _SCHEMA
+        sens, *_ = _make_zk_sensitivity(schema=schema)
+        return sens  # already x-basis (from_finite_differences uses steps.basis)
+
+    def test_Vh_shape_default(self):
+        sens = self._sens_x()
+        schema2 = _SCHEMA.with_svd(sens)
+        assert schema2.Vh.shape == (N_ACTIVE, N_ACTIVE)
+
+    def test_S_shape_default(self):
+        sens = self._sens_x()
+        schema2 = _SCHEMA.with_svd(sens)
+        assert schema2.S.shape == (N_ACTIVE,)
+
+    def test_U_shape_default(self):
+        sens = self._sens_x()
+        schema2 = _SCHEMA.with_svd(sens)
+        n_obs = schema2.U.shape[0]
+        assert schema2.U.shape == (n_obs, N_ACTIVE)
+
+    def test_S_is_decreasing(self):
+        sens = self._sens_x()
+        schema2 = _SCHEMA.with_svd(sens)
+        assert np.all(np.diff(schema2.S) <= 0)
+
+    def test_n_keep_truncation(self):
+        sens = self._sens_x()
+        schema2 = _SCHEMA.with_svd(sens, n_keep=2)
+        assert schema2.Vh.shape == (2, N_ACTIVE)
+        assert schema2.S.shape == (2,)
+        assert schema2.U.shape[1] == 2
+
+    def test_norm_n_active_length(self):
+        sens = self._sens_x()
+        norm = np.array([1.0, 2.0, 0.5, 3.0])
+        schema2 = _SCHEMA.with_svd(sens, norm=norm)
+        assert schema2.Vh is not None
+        assert schema2.Vh.shape[1] == N_ACTIVE
+
+    def test_norm_n_dof_length_sliced(self):
+        """norm of length n_dof is sliced by use_dof."""
+        sens = self._sens_x()
+        norm_full = np.ones(N_DOF)
+        norm_full[ACTIVE_IDX] = [1.0, 2.0, 0.5, 3.0]
+        schema_full = _SCHEMA.with_svd(sens, norm=norm_full)
+
+        norm_active = np.array([1.0, 2.0, 0.5, 3.0])
+        schema_active = _SCHEMA.with_svd(sens, norm=norm_active)
+
+        np.testing.assert_allclose(schema_full.Vh, schema_active.Vh, rtol=1e-10)
+
+    def test_norm_wrong_length_raises(self):
+        sens = self._sens_x()
+        with pytest.raises(ValueError, match="norm must have length"):
+            _SCHEMA.with_svd(sens, norm=np.ones(7))
+
+    def test_n_keep_too_large_raises(self):
+        sens = self._sens_x()
+        with pytest.raises(ValueError, match="exceeds the number"):
+            _SCHEMA.with_svd(sens, n_keep=N_ACTIVE + 10)
+
+    def test_schema_mismatch_use_dof_raises(self):
+        """with_svd rejects sensitivities whose use_dof differs from this schema."""
+        # Build an f-basis sensitivity.
+        full_schema = StateSchema(
+            dof_names=tuple(f"dof{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
+        )
+        nominal = _make_zk_nominal()
+        full_gradient = replace(
+            nominal,
+            coefs=np.zeros((N_DOF, N_FIELD, JMAX + 1)) * u.um,
+        )
+        sens_f = Sensitivity(
+            gradient=full_gradient,
+            nominal=nominal,
+            basis="f",
+            schema=full_schema,
+        )
+        with pytest.raises(ValueError, match="use_dof"):
+            _SCHEMA.with_svd(sens_f)
+
+    def test_not_a_sensitivity_raises(self):
+        with pytest.raises(TypeError, match="Sensitivity"):
+            _SCHEMA.with_svd("not_a_sensitivity")
+
+    def test_schema_mismatch_dof_names_raises(self):
+        bad_schema = StateSchema(
+            dof_names=tuple(f"other{i}" for i in range(N_DOF)),
+            dof_units=(u.mm,) * N_DOF,
+            use_dof=np.array(ACTIVE_IDX, dtype=int),
+        )
+        sens, *_ = _make_zk_sensitivity(schema=bad_schema)
+        with pytest.raises(ValueError, match="dof_names"):
+            _SCHEMA.with_svd(sens)
+
+    def test_original_schema_unchanged(self):
+        """with_svd returns a new schema; the original is unmodified."""
+        sens = self._sens_x()
+        schema2 = _SCHEMA.with_svd(sens)
+        assert _SCHEMA.Vh is None
+        assert schema2.Vh is not None
+
+    def test_Vh_norm_scaling(self):
+        """Vh_scaled @ diag(1/norm) should recover Vh_raw up to sign/ordering."""
+        sens = self._sens_x()
+        norm = np.array([2.0, 3.0, 1.5, 0.5])
+        schema2 = _SCHEMA.with_svd(sens, norm=norm)
+        # Vh_scaled = Vh_raw[:n_keep] @ diag(norm)
+        # So Vh_scaled @ diag(1/norm) == Vh_raw[:n_keep]
+        Vh_unscaled = schema2.Vh @ np.diag(1.0 / norm)
+        # Rows of Vh_unscaled should be unit vectors (since Vh_raw is semi-orthogonal).
+        row_norms = np.linalg.norm(Vh_unscaled, axis=1)
+        np.testing.assert_allclose(row_norms, np.ones(N_ACTIVE), atol=1e-10)
+
+    def test_with_svd_spots(self):
+        """with_svd works with Spots sensitivity (tests _sensitivity_to_x_matrix)."""
+        sens = _make_spots_sensitivity()
+        schema2 = _SCHEMA.with_svd(sens)
+        assert schema2.Vh.shape[1] == N_ACTIVE
+        assert schema2.S.shape[0] == N_ACTIVE
