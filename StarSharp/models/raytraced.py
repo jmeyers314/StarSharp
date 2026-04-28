@@ -235,7 +235,7 @@ class RaytracedOpticalModel:
 
         # Keep FieldCoords transforms state-independent and apply any optional
         # state-dependent pointing correction only at the raytrace input boundary.
-        pointing_model = getattr(self, "pointing_model", None)
+        pointing_model = self.pointing_model
         if pointing_model is None:
             dthx = 0.0 * u.rad
             dthy = 0.0 * u.rad
@@ -562,7 +562,7 @@ class RaytracedOpticalModel:
         self,
         kmax: int,
         field_outer: Quantity,
-        field_inner: Quantity = None,
+        field_inner: Quantity | None = None,
         **kwargs,
     ):
         """Compute the double-Zernike basis functions.
@@ -829,7 +829,7 @@ class RaytracedOpticalModel:
         self,
         kmax: int,
         field_outer: Quantity,
-        field_inner: Quantity = None,
+        field_inner: Quantity | None = None,
         tqdm: type[TqdmType] | None = None,
         **kwargs,
     ) -> Sensitivity:

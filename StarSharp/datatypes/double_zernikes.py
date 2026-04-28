@@ -116,7 +116,7 @@ class DoubleZernikes:
         """Return a Zernikes for a single field point."""
         from .zernikes import Zernikes
 
-        if self.rtp is not None and field.rtp != self.rtp:
+        if self.rtp is not None and field.rtp is not None and not np.allclose(self.rtp.rad, field.rtp.rad):
             raise ValueError("Field rtp must match DoubleZernikes rtp")
         field = getattr(field, self.frame)
 
