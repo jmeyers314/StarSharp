@@ -1,1135 +1,582 @@
-"""Tests for RaytracedOpticalModel methods (no ray-tracer required)."""
+"""Tests for RaytracedOpticalModel using the real LSST stack.
+
+Uses ``default_raytraced_model()`` so all tests exercise the actual batoid
+ray tracer.  The model fixture is module-scoped so the builder and camera are
+loaded once per session.
+
+Sensitivity tests use a single active DOF and a tiny field to keep runtimes
+short while still exercising the real finite-difference logic.
+"""
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 import astropy.units as u
 import numpy as np
 import pytest
+from astropy.coordinates import Angle
 
 from StarSharp.datatypes import (
     DoubleZernikes,
     FieldCoords,
     Sensitivity,
-    State,
+    Spots,
+    StateSchema,
+    StateFactory,
     Zernikes,
 )
+from StarSharp.models.fiducial import default_raytraced_model
 from StarSharp.models.raytraced import RaytracedOpticalModel
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-FIELD_OUTER = 1.75 * u.deg
-FIELD_INNER = 0.0 * u.deg
-PUPIL_OUTER = 4.18 * u.m
-PUPIL_INNER = 4.18 * 0.612 * u.m
-
-NDOF = 5
-NFIELD = 9   # >= KMAX+1 = 7 for a well-determined DZ fit
-JMAX = 10
-KMAX = 6
-
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Module-scoped fixtures
 # ---------------------------------------------------------------------------
 
 
-def _make_field() -> FieldCoords:
-    """Regular grid of field-angle positions in OCS degrees."""
-    x = np.linspace(-1.0, 1.0, 3) * u.deg
-    y = np.linspace(-1.0, 1.0, 3) * u.deg
-    xx, yy = np.meshgrid(x, y)
-    return FieldCoords(x=xx.ravel(), y=yy.ravel(), frame="ocs")
+@pytest.fixture(scope="module")
+def model() -> RaytracedOpticalModel:
+    """Real LSST ROM, r-band, zero rotator angle."""
+    return default_raytraced_model(band="r", rtp=Angle(0.0, unit=u.deg))
 
 
-def _make_steps(ndof: int = NDOF) -> State:
-    return State(
-        value=np.ones(ndof),
-        basis="f",
-        use_dof=np.arange(ndof),
-        n_dof=ndof,
-    )
-
-
-def _make_zk_sensitivity(rng=None) -> Sensitivity:
-    """Synthetic Sensitivity[Zernikes] with well-determined field sampling."""
-    if rng is None:
-        rng = np.random.default_rng(42)
-
-    field = _make_field()
-    nominal_coefs = rng.standard_normal((NFIELD, JMAX + 1)) * u.um
-    gradient_coefs = rng.standard_normal((NDOF, NFIELD, JMAX + 1)) * u.um
-
-    nominal = Zernikes(
-        coefs=nominal_coefs,
-        field=field,
-        R_outer=PUPIL_OUTER,
-        R_inner=PUPIL_INNER,
+@pytest.fixture(scope="module")
+def on_axis_field(model) -> FieldCoords:
+    """Single on-axis OCS field point."""
+    return FieldCoords(
+        x=0.0 * u.deg,
+        y=0.0 * u.deg,
         frame="ocs",
+        rtp=model.rtp,
+        camera=model.camera,
     )
-    gradient = Zernikes(
-        coefs=gradient_coefs,
-        field=field,
-        R_outer=PUPIL_OUTER,
-        R_inner=PUPIL_INNER,
+
+
+@pytest.fixture(scope="module")
+def small_field(model) -> FieldCoords:
+    """Three OCS field points — fast for ray-trace calls."""
+    return FieldCoords(
+        x=np.array([0.0, 0.5, -0.5]) * u.deg,
+        y=np.array([0.0, 0.3,  0.3]) * u.deg,
         frame="ocs",
-    )
-
-    steps = _make_steps()
-    return Sensitivity(
-        gradient=gradient,
-        nominal=nominal,
-        basis=steps.basis,
-        use_dof=steps.use_dof,
-        n_dof=steps.n_dof,
-        Vh=steps.Vh,
-    )
-
-
-def _call_method(mock_model, field, steps, kmax=KMAX, jmax=JMAX, rings=10,
-                 offset=None):
-    """Call double_zernikes_sensitivity as an unbound method on mock_model."""
-    return RaytracedOpticalModel.double_zernikes_sensitivity(
-        mock_model,
-        field=field,
-        steps=steps,
-        kmax=kmax,
-        field_outer=FIELD_OUTER,
-        field_inner=FIELD_INNER,
-        jmax=jmax,
-        rings=rings,
-        offset=offset,
+        rtp=model.rtp,
+        camera=model.camera,
     )
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Field-coordinate helpers
+# ---------------------------------------------------------------------------
+
+
+class TestMakeHexField:
+    def test_returns_field_coords(self, model):
+        fc = model.make_hex_field()
+        assert isinstance(fc, FieldCoords)
+
+    def test_frame_is_ocs(self, model):
+        fc = model.make_hex_field()
+        assert fc.frame == "ocs"
+
+    def test_rtp_matches_model(self, model):
+        fc = model.make_hex_field()
+        assert np.isclose(fc.rtp.rad, model.rtp.rad)
+
+    def test_camera_matches_model(self, model):
+        fc = model.make_hex_field()
+        assert fc.camera is model.camera
+
+    def test_nrad_controls_npoints(self, model):
+        fc5 = model.make_hex_field(nrad=5)
+        fc10 = model.make_hex_field(nrad=10)
+        assert len(fc10.x) > len(fc5.x)
+
+    def test_outer_controls_extent(self, model):
+        fc_small = model.make_hex_field(outer=1.0 * u.deg, nrad=5)
+        fc_large = model.make_hex_field(outer=2.0 * u.deg, nrad=5)
+        assert fc_large.x.max() > fc_small.x.max()
+
+
+class TestMakeCcdField:
+    def test_returns_field_coords(self, model):
+        fc = model.make_ccd_field()
+        assert isinstance(fc, FieldCoords)
+
+    def test_frame_is_ccs(self, model):
+        fc = model.make_ccd_field()
+        assert fc.frame == "ccs"
+
+    def test_camera_set(self, model):
+        fc = model.make_ccd_field()
+        assert fc.camera is model.camera
+
+    def test_nx1_gives_one_point_per_detector(self, model):
+        fc = model.make_ccd_field(nx=1)
+        n_detectors = sum(
+            1 for det in model.camera
+            if det.getPhysicalType() in ("E2V", "ITL")
+        )
+        assert len(fc.x) == n_detectors
+
+    def test_detnums_filters_detectors(self, model):
+        fc_all = model.make_ccd_field(nx=1)
+        fc_sub = model.make_ccd_field(nx=1, detnums=[0, 1, 2])
+        assert len(fc_sub.x) < len(fc_all.x)
+
+
+class TestMakeWfsMeanField:
+    def test_returns_field_coords(self, model):
+        fc = model.make_wfs_mean_field()
+        assert isinstance(fc, FieldCoords)
+
+    def test_four_wfs_pairs(self, model):
+        fc = model.make_wfs_mean_field()
+        assert len(fc.x) == 4
+
+    def test_frame_is_ccs(self, model):
+        fc = model.make_wfs_mean_field()
+        assert fc.frame == "ccs"
+
+
+# ---------------------------------------------------------------------------
+# spots()
+# ---------------------------------------------------------------------------
+
+
+class TestSpots:
+    @pytest.fixture(scope="class")
+    def spots(self, model, small_field):
+        return model.spots(field=small_field, nrad=3, reference="ring")
+
+    def test_returns_spots(self, spots):
+        assert isinstance(spots, Spots)
+
+    def test_frame_is_ccs(self, spots):
+        assert spots.frame == "ccs"
+
+    def test_rtp_set(self, spots, model):
+        assert np.isclose(spots.rtp.rad, model.rtp.rad)
+
+    def test_camera_is_model_camera(self, spots, model):
+        assert spots.camera is model.camera
+
+    def test_wavelength_set(self, spots, model):
+        assert spots.wavelength == model.wavelength
+
+    def test_nfield_matches_input(self, spots, small_field):
+        assert spots.nfield == len(small_field.x)
+
+    def test_dx_dy_units_micron(self, spots):
+        assert spots.dx.unit == u.micron
+        assert spots.dy.unit == u.micron
+
+    def test_field_units_mm(self, spots):
+        assert spots.field.x.unit == u.mm
+
+    def test_no_all_vignetted(self, spots):
+        # On-sky science field: at least some rays should get through
+        assert not np.all(spots.vignetted)
+
+    def test_state_none_matches_zero_state(self, model, small_field):
+        sf = StateFactory(model.state_schema)
+        spots_none = model.spots(field=small_field, nrad=3, reference="ring",
+                                 state=None)
+        spots_zero = model.spots(field=small_field, nrad=3, reference="ring",
+                                 state=sf.zero("f"))
+        np.testing.assert_allclose(
+            spots_none.dx.to_value(u.micron),
+            spots_zero.dx.to_value(u.micron),
+            atol=1e-10,
+        )
+
+
+# ---------------------------------------------------------------------------
+# zernikes()
+# ---------------------------------------------------------------------------
+
+
+class TestZernikes:
+    @pytest.fixture(scope="class")
+    def zk(self, model, small_field):
+        return model.zernikes(field=small_field, jmax=10, rings=3)
+
+    def test_returns_zernikes(self, zk):
+        assert isinstance(zk, Zernikes)
+
+    def test_frame_is_ocs(self, zk):
+        assert zk.frame == "ocs"
+
+    def test_rtp_matches_model(self, zk, model):
+        assert np.isclose(zk.rtp.rad, model.rtp.rad)
+
+    def test_r_outer_set(self, zk):
+        assert zk.R_outer is not None
+
+    def test_r_inner_set(self, zk):
+        assert zk.R_inner is not None
+
+    def test_jmax(self, zk):
+        assert zk.jmax == 10
+
+    def test_nfield_matches_input(self, zk, small_field):
+        assert zk.nfield == len(small_field.x)
+
+    def test_coef_units_micron(self, zk):
+        assert zk.coefs.unit.is_equivalent(u.micron)
+
+    def test_state_none_matches_zero_state(self, model, small_field):
+        sf = StateFactory(model.state_schema)
+        zk_none = model.zernikes(field=small_field, jmax=10, rings=3, state=None)
+        zk_zero = model.zernikes(field=small_field, jmax=10, rings=3,
+                                 state=sf.zero("f"))
+        np.testing.assert_allclose(
+            zk_none.coefs.to_value(u.um),
+            zk_zero.coefs.to_value(u.um),
+            atol=1e-10,
+        )
+
+
+# ---------------------------------------------------------------------------
+# zernikes_sensitivity()
+# ---------------------------------------------------------------------------
+
+
+class TestZernikesSensitivity:
+    """Use basis='x' with a single DOF (M2_dz, index 0) and a tiny field
+    so each test requires only 2 ray-trace evaluations."""
+
+    def test_step_none_raises(self, model, small_field):
+        schema_no_step = StateSchema(
+            dof_names=model.state_schema.dof_names,
+            dof_units=model.state_schema.dof_units,
+        )
+        model_no_step = RaytracedOpticalModel(
+            builder=model.builder,
+            rtp=model.rtp,
+            wavelength=model.wavelength,
+            state_schema=schema_no_step,
+        )
+        with pytest.raises(ValueError, match="step"):
+            model_no_step.zernikes_sensitivity(
+                field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
+            )
+
+    def test_basis_v_raises(self, model, small_field):
+        with pytest.raises(ValueError, match="v"):
+            model.zernikes_sensitivity(
+                field=small_field, jmax=4, rings=3, basis="v"
+            )
+
+    def test_use_dof_without_x_raises(self, model, small_field):
+        with pytest.raises(ValueError, match="use_dof"):
+            model.zernikes_sensitivity(
+                field=small_field, jmax=4, rings=3, basis="f", use_dof=[0]
+            )
+
+    def test_returns_sensitivity(self, model, small_field):
+        sens = model.zernikes_sensitivity(
+            field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
+        )
+        assert isinstance(sens, Sensitivity)
+
+    def test_nominal_is_zernikes(self, model, small_field):
+        sens = model.zernikes_sensitivity(
+            field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
+        )
+        assert isinstance(sens.nominal, Zernikes)
+
+    def test_gradient_is_zernikes(self, model, small_field):
+        sens = model.zernikes_sensitivity(
+            field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
+        )
+        assert isinstance(sens.gradient, Zernikes)
+
+    def test_gradient_shape_x_basis_single_dof(self, model, small_field):
+        nfield = len(small_field.x)
+        jmax = 4
+        sens = model.zernikes_sensitivity(
+            field=small_field, jmax=jmax, rings=3, basis="x", use_dof=[0]
+        )
+        assert sens.gradient.coefs.shape == (1, nfield, jmax + 1)
+
+    def test_gradient_shape_f_basis_all_dof(self, model, on_axis_field):
+        # f-basis: gradient first dim == n_dof; use a single field point to
+        # limit trace count to n_dof + 1 = 51
+        jmax = 4
+        sens = model.zernikes_sensitivity(
+            field=on_axis_field, jmax=jmax, rings=3, basis="f"
+        )
+        n_dof = model.state_schema.n_dof
+        assert sens.gradient.coefs.shape == (n_dof, 1, jmax + 1)
+
+    def test_basis_matches_schema(self, model, small_field):
+        sens = model.zernikes_sensitivity(
+            field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
+        )
+        assert sens.basis == "x"
+
+    def test_use_dof_reflected_in_schema(self, model, small_field):
+        sens = model.zernikes_sensitivity(
+            field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
+        )
+        np.testing.assert_array_equal(sens.schema.use_dof, [0])
+
+    def test_use_dof_override_vs_schema_default(self, model, small_field):
+        """x-basis sensitivity with use_dof=[0, 1] should differ from [0] alone."""
+        sens1 = model.zernikes_sensitivity(
+            field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
+        )
+        sens2 = model.zernikes_sensitivity(
+            field=small_field, jmax=4, rings=3, basis="x", use_dof=[0, 1]
+        )
+        assert sens2.gradient.coefs.shape[0] == 2
+        # First DOF column should match between the two
+        np.testing.assert_allclose(
+            sens1.gradient.coefs.to_value(u.um),
+            sens2.gradient.coefs[:1].to_value(u.um),
+            atol=1e-10,
+        )
+
+    def test_m2_dz_defocus_is_nonzero(self, model, small_field):
+        """M2_dz perturbation should produce a measurable defocus (Z4)."""
+        sens = model.zernikes_sensitivity(
+            field=small_field, jmax=10, rings=3, basis="x", use_dof=[0]
+        )
+        # Z4 = defocus; expect a nonzero gradient
+        assert not np.allclose(sens.gradient.coefs[:, :, 4].to_value(u.um), 0.0)
+
+
+# ---------------------------------------------------------------------------
+# spots_sensitivity()
+# ---------------------------------------------------------------------------
+
+
+class TestSpotsSensitivity:
+    def test_step_none_raises(self, model, small_field):
+        schema_no_step = StateSchema(
+            dof_names=model.state_schema.dof_names,
+            dof_units=model.state_schema.dof_units,
+        )
+        model_no_step = RaytracedOpticalModel(
+            builder=model.builder,
+            rtp=model.rtp,
+            wavelength=model.wavelength,
+            state_schema=schema_no_step,
+        )
+        with pytest.raises(ValueError, match="step"):
+            model_no_step.spots_sensitivity(
+                field=small_field, nrad=3, basis="x", use_dof=[0]
+            )
+
+    def test_basis_v_raises(self, model, small_field):
+        with pytest.raises(ValueError, match="v"):
+            model.spots_sensitivity(field=small_field, nrad=3, basis="v")
+
+    def test_returns_sensitivity(self, model, small_field):
+        sens = model.spots_sensitivity(
+            field=small_field, nrad=3, basis="x", use_dof=[0]
+        )
+        assert isinstance(sens, Sensitivity)
+
+    def test_nominal_is_spots(self, model, small_field):
+        sens = model.spots_sensitivity(
+            field=small_field, nrad=3, basis="x", use_dof=[0]
+        )
+        assert isinstance(sens.nominal, Spots)
+
+    def test_gradient_is_spots(self, model, small_field):
+        sens = model.spots_sensitivity(
+            field=small_field, nrad=3, basis="x", use_dof=[0]
+        )
+        assert isinstance(sens.gradient, Spots)
+
+    def test_gradient_shape_x_basis_single_dof(self, model, small_field):
+        sens = model.spots_sensitivity(
+            field=small_field, nrad=3, basis="x", use_dof=[0]
+        )
+        # gradient shape: (ndof, nfield, nray)
+        assert sens.gradient.dx.shape[0] == 1
+        assert sens.gradient.dx.shape[1] == len(small_field.x)
+
+    def test_basis_reflected_in_schema(self, model, small_field):
+        sens = model.spots_sensitivity(
+            field=small_field, nrad=3, basis="x", use_dof=[0]
+        )
+        assert sens.basis == "x"
+        np.testing.assert_array_equal(sens.schema.use_dof, [0])
+
+
+# ---------------------------------------------------------------------------
+# double_zernikes_sensitivity()
 # ---------------------------------------------------------------------------
 
 
 class TestDoubleZernikesSensitivity:
-    """Unit tests for RaytracedOpticalModel.double_zernikes_sensitivity.
+    @pytest.fixture(scope="class")
+    def dz_sens(self, model, small_field):
+        return model.double_zernikes_sensitivity(
+            field=small_field,
+            kmax=4,
+            field_outer=1.75 * u.deg,
+            jmax=4,
+            rings=3,
+            basis="x",
+            use_dof=[0],
+        )
 
-    The underlying ray-tracer is replaced by a mock whose
-    ``zernikes_sensitivity`` returns a pre-built Sensitivity[Zernikes].
+    def test_returns_sensitivity(self, dz_sens):
+        assert isinstance(dz_sens, Sensitivity)
+
+    def test_nominal_is_double_zernikes(self, dz_sens):
+        assert isinstance(dz_sens.nominal, DoubleZernikes)
+
+    def test_gradient_is_double_zernikes(self, dz_sens):
+        assert isinstance(dz_sens.gradient, DoubleZernikes)
+
+    def test_gradient_coefs_shape(self, dz_sens):
+        kmax = 4
+        jmax = 4
+        assert dz_sens.gradient.coefs.shape == (1, kmax + 1, jmax + 1)
+
+    def test_nominal_coefs_shape(self, dz_sens):
+        kmax = 4
+        jmax = 4
+        assert dz_sens.nominal.coefs.shape == (kmax + 1, jmax + 1)
+
+    def test_basis_x(self, dz_sens):
+        assert dz_sens.basis == "x"
+
+    def test_use_dof_reflected(self, dz_sens):
+        np.testing.assert_array_equal(dz_sens.schema.use_dof, [0])
+
+    def test_consistent_with_direct_double(self, model, small_field):
+        """double_zernikes_sensitivity gradient should equal
+        zernikes_sensitivity.gradient.double() directly."""
+        kmax = 4
+        field_outer = 1.75 * u.deg
+        jmax = 4
+
+        zk_sens = model.zernikes_sensitivity(
+            field=small_field, jmax=jmax, rings=3, basis="x", use_dof=[0]
+        )
+        dz_sens = model.double_zernikes_sensitivity(
+            field=small_field, kmax=kmax, field_outer=field_outer,
+            jmax=jmax, rings=3, basis="x", use_dof=[0],
+        )
+
+        expected = zk_sens.gradient.double(kmax, field_outer)
+        np.testing.assert_allclose(
+            dz_sens.gradient.coefs.to_value(u.um),
+            expected.coefs.to_value(u.um),
+            atol=1e-12,
+        )
+
+
+# ---------------------------------------------------------------------------
+# optimize()
+# ---------------------------------------------------------------------------
+
+# Cam_dz is index 5 in the 50-DOF schema.
+_CAM_DZ_IDX = 5
+_CAM_DZ_OFFSET_UM = 50.0  # applied as a known defocus
+
+
+def _spot_rms(spots: Spots) -> float:
+    """RMS spot radius across all unvignetted rays and field points (micron)."""
+    w = ~spots.vignetted
+    dx = spots.dx.to_value(u.micron)[w]
+    dy = spots.dy.to_value(u.micron)[w]
+    return float(np.sqrt(np.mean(dx**2 + dy**2)))
+
+
+class TestOptimize:
+    """Verify ROM.optimize() recovers a known Cam_dz defocus in both modes.
+
+    A model with a 50 um Cam_dz offset is built once per class.  An x-basis
+    guess with only Cam_dz free is passed to optimize(); we check that the
+    result cancels the offset and shrinks the spot RMS.
     """
 
-    @pytest.fixture
-    def setup(self):
-        zk_sens = _make_zk_sensitivity()
-        mock_model = MagicMock()
-        mock_model.zernikes_sensitivity.return_value = zk_sens
-        field = _make_field()
-        steps = _make_steps()
-        return mock_model, zk_sens, field, steps
-
-    # --- return types ---
-
-    def test_returns_sensitivity(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert isinstance(result, Sensitivity)
-
-    def test_nominal_is_double_zernikes(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert isinstance(result.nominal, DoubleZernikes)
-
-    def test_gradient_is_double_zernikes(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert isinstance(result.gradient, DoubleZernikes)
-
-    # --- shapes ---
-
-    def test_gradient_coefs_shape(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.gradient.coefs.shape == (NDOF, KMAX + 1, JMAX + 1)
-
-    def test_nominal_coefs_shape(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.nominal.coefs.shape == (KMAX + 1, JMAX + 1)
-
-    # --- metadata passthrough from steps ---
-
-    def test_basis_passthrough(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.basis == steps.basis
-
-    def test_use_dof_passthrough(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        np.testing.assert_array_equal(result.use_dof, steps.use_dof)
-
-    def test_n_dof_passthrough(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.n_dof == steps.n_dof
-
-    def test_vh_passthrough(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.Vh is steps.Vh  # both None
-
-    # --- physical parameters ---
-
-    def test_field_outer_on_nominal(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.nominal.field_outer == FIELD_OUTER
-
-    def test_field_inner_on_nominal(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.nominal.field_inner == FIELD_INNER
-
-    def test_pupil_params_on_nominal(self, setup):
-        mock_model, _, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        assert result.nominal.pupil_outer == PUPIL_OUTER
-        assert result.nominal.pupil_inner == PUPIL_INNER
-
-    # --- projection correctness ---
-
-    def test_nominal_matches_direct_double(self, setup):
-        """result.nominal should equal zk_sens.nominal.double() directly."""
-        mock_model, zk_sens, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        expected = zk_sens.nominal.double(KMAX, FIELD_OUTER, FIELD_INNER)
-        np.testing.assert_allclose(
-            result.nominal.coefs.to_value(u.um),
-            expected.coefs.to_value(u.um),
-            atol=1e-12,
+    @pytest.fixture(scope="class")
+    def defocused_model(self, model):
+        """ROM with a 50 um Cam_dz offset baked into the offset State."""
+        sf = StateFactory(model.state_schema)
+        dof_val = np.zeros(model.state_schema.n_dof)
+        dof_val[_CAM_DZ_IDX] = _CAM_DZ_OFFSET_UM
+        return RaytracedOpticalModel(
+            builder=model.builder,
+            rtp=model.rtp,
+            wavelength=model.wavelength,
+            state_schema=model.state_schema,
+            camera=model.camera,
+            offset=sf.f(dof_val),
         )
 
-    def test_gradient_matches_direct_double(self, setup):
-        """result.gradient should equal zk_sens.gradient.double() directly."""
-        mock_model, zk_sens, field, steps = setup
-        result = _call_method(mock_model, field, steps)
-        expected = zk_sens.gradient.double(KMAX, FIELD_OUTER, FIELD_INNER)
-        np.testing.assert_allclose(
-            result.gradient.coefs.to_value(u.um),
-            expected.coefs.to_value(u.um),
-            atol=1e-12,
+    @pytest.fixture(scope="class")
+    def cam_dz_schema(self, model):
+        """Schema with only Cam_dz active."""
+        from dataclasses import replace
+        return replace(model.state_schema, use_dof=np.array([_CAM_DZ_IDX]), Vh=None)
+
+    @pytest.fixture(scope="class")
+    def guess(self, cam_dz_schema):
+        """Zero x-basis guess with Cam_dz as the single free DOF."""
+        return StateFactory(cam_dz_schema).zero("x")
+
+    @pytest.fixture(scope="class")
+    def result_dx(self, defocused_model, guess, small_field):
+        return defocused_model.optimize(
+            guess=guess, field=small_field, nrad=5, mode="dx"
         )
 
-    # --- mock call verification ---
-
-    def test_zernikes_sensitivity_called_once(self, setup):
-        mock_model, _, field, steps = setup
-        _call_method(mock_model, field, steps)
-        mock_model.zernikes_sensitivity.assert_called_once()
-
-    def test_zernikes_sensitivity_called_with_field_and_steps(self, setup):
-        mock_model, _, field, steps = setup
-        _call_method(mock_model, field, steps)
-        call_kwargs = mock_model.zernikes_sensitivity.call_args.kwargs
-        assert call_kwargs["field"] is field
-        assert call_kwargs["steps"] is steps
-
-    def test_zernikes_sensitivity_receives_jmax(self, setup):
-        mock_model, _, field, steps = setup
-        _call_method(mock_model, field, steps, jmax=JMAX)
-        call_kwargs = mock_model.zernikes_sensitivity.call_args.kwargs
-        assert call_kwargs["jmax"] == JMAX
-
-    def test_zernikes_sensitivity_receives_rings(self, setup):
-        mock_model, _, field, steps = setup
-        _call_method(mock_model, field, steps, rings=5)
-        call_kwargs = mock_model.zernikes_sensitivity.call_args.kwargs
-        assert call_kwargs["rings"] == 5
-
-    def test_zernikes_sensitivity_receives_offset(self, setup):
-        mock_model, _, field, steps = setup
-        offset = State(value=np.zeros(NDOF), basis="f")
-        _call_method(mock_model, field, steps, offset=offset)
-        call_kwargs = mock_model.zernikes_sensitivity.call_args.kwargs
-        assert call_kwargs["offset"] is offset
-
-    def test_offset_defaults_to_none(self, setup):
-        mock_model, _, field, steps = setup
-        _call_method(mock_model, field, steps)
-        call_kwargs = mock_model.zernikes_sensitivity.call_args.kwargs
-        assert call_kwargs["offset"] is None
-
-
-# ---------------------------------------------------------------------------
-# Batch-broadcast tests for spots() and zernikes()
-# ---------------------------------------------------------------------------
-
-from types import SimpleNamespace
-
-from astropy.coordinates import Angle
-
-import StarSharp.models.raytraced as raytraced_module
-
-
-class _FakeTelescope:
-    """Trivial telescope stub whose trace() is the identity."""
-
-    def trace(self, rays):
-        return rays
-
-
-class _FakeBuilder:
-    """Chainable builder stub that always returns _FakeTelescope."""
-
-    def with_rtp(self, _rtp):
-        return self
-
-    def with_aos_dof(self, _f):
-        return self
-
-    def with_extra_zk(self, _zk, _eps):
-        return self
-
-    def build_det(self, detnum):
-        return _FakeTelescope()
-
-
-def _make_model_stub():
-    """Create a RaytracedOpticalModel without calling __init__."""
-    model = RaytracedOpticalModel.__new__(RaytracedOpticalModel)
-    model.builder = _FakeBuilder()
-    model.rtp = Angle(0.0, unit=u.deg)
-    model.wavelength = 620.0 * u.nm
-    model.camera = None
-    model.tqdm = None
-    model.steps = None
-    return model
-
-
-def _make_batched_field(batch_shape, nfield, rtp=None):
-    """FieldCoords with shape (*batch_shape, nfield) in OCS degrees."""
-    if rtp is None:
-        rtp = Angle(0.0, unit=u.deg)
-    shape = batch_shape + (nfield,)
-    n = int(np.prod(shape))
-    x = (np.arange(n, dtype=float) * 0.01).reshape(shape) * u.deg
-    y = (0.5 + np.arange(n, dtype=float) * 0.02).reshape(shape) * u.deg
-    return FieldCoords(x=x, y=y, frame="ocs", rtp=rtp)
-
-
-def _patch_detnum_zero(monkeypatch):
-    """Make FieldCoords.detnum always return 0 (valid detector)."""
-    monkeypatch.setattr(
-        FieldCoords,
-        "detnum",
-        property(lambda self: np.zeros(self.x.shape, dtype=int)),
-    )
-
-
-class TestZernikesBatchBroadcast:
-    """Verify zernikes() output shapes and values with non-trivial batch dims."""
-
-    @staticmethod
-    def _patch_zernikeGQ(monkeypatch):
-        """Replace batoid.zernikeGQ with a deterministic function."""
-
-        def fake_zernikeGQ(telescope, theta_x, theta_y, wavelength,
-                           rings, jmax, eps):
-            base = 10.0 * theta_x + 100.0 * theta_y
-            return base + np.arange(jmax + 1, dtype=float)
-
-        monkeypatch.setattr(raytraced_module.batoid, "zernikeGQ", fake_zernikeGQ)
-
-    def test_1d_batch(self, monkeypatch):
-        """batch_shape = (2,), nfield = 3  ->  coefs.shape == (2, 3, jmax+1)."""
-        model = _make_model_stub()
-        field = _make_batched_field((2,), 3, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        jmax = 4
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        zk = RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, jmax=jmax, rings=3,
+    @pytest.fixture(scope="class")
+    def result_var(self, defocused_model, guess, small_field):
+        return defocused_model.optimize(
+            guess=guess, field=small_field, nrad=5, mode="var"
         )
 
-        assert zk.batch_shape == (2,)
-        assert zk.nfield == 3
-        assert zk.coefs.shape == (2, 3, jmax + 1)
-
-    def test_2d_batch(self, monkeypatch):
-        """batch_shape = (2, 4), nfield = 3."""
-        model = _make_model_stub()
-        field = _make_batched_field((2, 4), 3, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        jmax = 4
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        zk = RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, jmax=jmax, rings=3,
-        )
-
-        assert zk.batch_shape == (2, 4)
-        assert zk.nfield == 3
-        assert zk.coefs.shape == (2, 4, 3, jmax + 1)
-
-    def test_values_match_flat(self, monkeypatch):
-        """Batched results match looping over each batch element individually."""
-        model = _make_model_stub()
-        batch_shape = (2,)
-        nfield = 3
-        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        jmax = 4
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        zk_batched = RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, jmax=jmax, rings=3,
-        )
-
-        for ib in range(batch_shape[0]):
-            flat_field = FieldCoords(
-                x=field.x[ib], y=field.y[ib],
-                frame="ocs", rtp=model.rtp,
-            )
-            zk_flat = RaytracedOpticalModel.zernikes(
-                model, field=flat_field, state=state, jmax=jmax, rings=3,
-            )
-            np.testing.assert_allclose(
-                zk_batched.coefs[ib].to_value(u.um),
-                zk_flat.coefs.to_value(u.um),
-                atol=1e-12,
-            )
-
-    def test_state_none_accepted(self, monkeypatch):
-        """zernikes() should not crash when state is None."""
-        model = _make_model_stub()
-        field = _make_batched_field((2,), 3, rtp=model.rtp)
-        jmax = 4
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        zk = RaytracedOpticalModel.zernikes(
-            model, field=field, state=None, jmax=jmax, rings=3,
-        )
-        assert zk.coefs.shape == (2, 3, jmax + 1)
-
-    def test_detnum_minus1_gives_nan(self, monkeypatch):
-        """Points with detnum == -1 should produce NaN coefficients."""
-        model = _make_model_stub()
-        field = _make_batched_field((2,), 3, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        jmax = 4
-        self._patch_zernikeGQ(monkeypatch)
-
-        def detnum_with_hole(self_fc):
-            out = np.zeros(self_fc.x.shape, dtype=int)
-            out[1, 1] = -1
-            return out
-
-        monkeypatch.setattr(
-            FieldCoords, "detnum",
-            property(detnum_with_hole),
-        )
-
-        zk = RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, jmax=jmax, rings=3,
-        )
-
-        assert not np.any(np.isnan(zk.coefs[0].value))   # batch 0 all valid
-        assert np.all(np.isnan(zk.coefs[1, 1].value))     # batch 1, field 1 NaN
-        assert not np.any(np.isnan(zk.coefs[1, 0].value))
-        assert not np.any(np.isnan(zk.coefs[1, 2].value))
-
-
-class TestSpotsBatchBroadcast:
-    """Verify spots() output shapes and values with non-trivial batch dims."""
-
-    @staticmethod
-    def _patch_hexapolar(monkeypatch, px, py):
-        monkeypatch.setattr(
-            raytraced_module.batoid.utils, "hexapolar",
-            lambda **kwargs: (px, py),
-        )
-
-    @staticmethod
-    def _patch_fromStop(monkeypatch):
-        """Replace RayVector.fromStop with a trivial deterministic function."""
-
-        def fake_fromStop(px_in, py_in, theta_x, theta_y, optic, wavelength):
-            px_arr = np.atleast_1d(np.asarray(px_in, dtype=float))
-            py_arr = np.atleast_1d(np.asarray(py_in, dtype=float))
-            # Chief ray (single point at origin)
-            if px_arr.size == 1 and py_arr.size == 1 and px_arr[0] == 0.0:
-                return SimpleNamespace(
-                    x=np.array([theta_x]),
-                    y=np.array([theta_y]),
-                    vignetted=np.array([False]),
-                )
-            # Grid rays: place them at pupil coord + field angle
-            return SimpleNamespace(
-                x=px_arr + theta_x,
-                y=py_arr + theta_y,
-                vignetted=np.zeros(len(px_arr), dtype=bool),
-            )
-
-        monkeypatch.setattr(
-            raytraced_module.batoid.RayVector, "fromStop",
-            staticmethod(fake_fromStop),
-        )
-
-    def test_1d_batch_shapes(self, monkeypatch):
-        model = _make_model_stub()
-        field = _make_batched_field((2,), 3, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        sp = RaytracedOpticalModel.spots(
-            model, field=field, state=None, nrad=2, reference="chief",
-        )
-
-        assert sp.batch_shape == (2,)
-        assert sp.nfield == 3
-        assert sp.nray == 3
-        assert sp.dx.shape == (2, 3, 3)
-        assert sp.dy.shape == (2, 3, 3)
-        assert sp.vignetted.shape == (2, 3, 3)
-        assert sp.field.x.shape == (2, 3)
-
-    def test_2d_batch_shapes(self, monkeypatch):
-        model = _make_model_stub()
-        field = _make_batched_field((2, 4), 3, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        sp = RaytracedOpticalModel.spots(
-            model, field=field, state=None, nrad=2, reference="chief",
-        )
-
-        assert sp.batch_shape == (2, 4)
-        assert sp.nfield == 3
-        assert sp.dx.shape == (2, 4, 3, 3)
-        assert sp.field.x.shape == (2, 4, 3)
-
-    def test_values_match_flat(self, monkeypatch):
-        """Batched results match looping over each batch element individually."""
-        model = _make_model_stub()
-        field = _make_batched_field((2,), 3, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        sp_batched = RaytracedOpticalModel.spots(
-            model, field=field, state=None, nrad=2, reference="chief",
-        )
-
-        for ib in range(2):
-            flat_field = FieldCoords(
-                x=field.x[ib], y=field.y[ib],
-                frame="ocs", rtp=model.rtp,
-            )
-            sp_flat = RaytracedOpticalModel.spots(
-                model, field=flat_field, state=None, nrad=2, reference="chief",
-            )
-            np.testing.assert_allclose(
-                sp_batched.dx[ib].to_value(u.micron),
-                sp_flat.dx.to_value(u.micron),
-                atol=1e-12,
-            )
-            np.testing.assert_allclose(
-                sp_batched.dy[ib].to_value(u.micron),
-                sp_flat.dy.to_value(u.micron),
-                atol=1e-12,
-            )
-            np.testing.assert_array_equal(
-                sp_batched.vignetted[ib], sp_flat.vignetted,
-            )
-
-    def test_detnum_minus1_gives_nan_and_vignetted(self, monkeypatch):
-        """Off-detector points should have NaN dx/dy and vignetted=True."""
-        model = _make_model_stub()
-        field = _make_batched_field((2,), 3, rtp=model.rtp)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        def detnum_with_hole(self_fc):
-            out = np.zeros(self_fc.x.shape, dtype=int)
-            out[1, 1] = -1
-            return out
-
-        monkeypatch.setattr(
-            FieldCoords, "detnum",
-            property(detnum_with_hole),
-        )
-
-        sp = RaytracedOpticalModel.spots(
-            model, field=field, state=None, nrad=2, reference="chief",
-        )
-
-        # batch 0: all valid -> no NaN
-        assert not np.any(np.isnan(sp.dx[0].value))
-        # batch 1, field 1: off-detector -> NaN + vignetted
-        assert np.all(np.isnan(sp.dx[1, 1].value))
-        assert np.all(sp.vignetted[1, 1])
-        # batch 1, fields 0/2: still valid
-        assert not np.any(np.isnan(sp.dx[1, 0].value))
-        assert not np.any(np.isnan(sp.dx[1, 2].value))
-
-
-# ---------------------------------------------------------------------------
-# Extra Zernike perturbation (zk parameter) tests
-# ---------------------------------------------------------------------------
-
-
-class _RecordingBuilder:
-    """Builder stub that records with_extra_zk calls."""
-
-    def __init__(self):
-        self.extra_zk_calls = []
-
-    def with_rtp(self, _rtp):
-        return self
-
-    def with_aos_dof(self, _f):
-        return self
-
-    def with_extra_zk(self, zk, eps):
-        self.extra_zk_calls.append((zk.copy(), eps))
-        return self
-
-    def build_det(self, detnum):
-        return _FakeTelescope()
-
-
-def _make_recording_model_stub():
-    """Model stub whose builder records with_extra_zk calls."""
-    model = RaytracedOpticalModel.__new__(RaytracedOpticalModel)
-    model.builder = _RecordingBuilder()
-    model.rtp = Angle(0.0, unit=u.deg)
-    model.wavelength = 620.0 * u.nm
-    model.camera = None
-    model.tqdm = None
-    model.steps = None
-    return model
-
-
-class TestSpotsExtraZk:
-    """Verify extra Zernike perturbation broadcasting in spots()."""
-
-    @staticmethod
-    def _patch_hexapolar(monkeypatch, px, py):
-        monkeypatch.setattr(
-            raytraced_module.batoid.utils, "hexapolar",
-            lambda **kwargs: (px, py),
-        )
-
-    @staticmethod
-    def _patch_fromStop(monkeypatch):
-        def fake_fromStop(px_in, py_in, theta_x, theta_y, optic, wavelength):
-            px_arr = np.atleast_1d(np.asarray(px_in, dtype=float))
-            py_arr = np.atleast_1d(np.asarray(py_in, dtype=float))
-            if px_arr.size == 1 and py_arr.size == 1 and px_arr[0] == 0.0:
-                return SimpleNamespace(
-                    x=np.array([theta_x]),
-                    y=np.array([theta_y]),
-                    vignetted=np.array([False]),
-                )
-            return SimpleNamespace(
-                x=px_arr + theta_x,
-                y=py_arr + theta_y,
-                vignetted=np.zeros(len(px_arr), dtype=bool),
-            )
-        monkeypatch.setattr(
-            raytraced_module.batoid.RayVector, "fromStop",
-            staticmethod(fake_fromStop),
-        )
-
-    def test_zk_none_no_extra_zk_calls(self, monkeypatch):
-        """When zk=None, with_extra_zk is never called."""
-        model = _make_recording_model_stub()
-        field = _make_batched_field((), 3, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=None, nrad=2, reference="chief",
-        )
-        assert len(model.builder.extra_zk_calls) == 0
-
-    def test_uniform_zk_broadcast(self, monkeypatch):
-        """(1, jmax+1) zk broadcasts the same perturbation to all field points."""
-        model = _make_recording_model_stub()
-        nfield = 3
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        zk_coefs = np.array([[0.0, 1e-7, 2e-7]]) * u.m  # (1, 3)
-        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
-        )
-
-        assert len(model.builder.extra_zk_calls) == nfield
-        for zk_arg, eps in model.builder.extra_zk_calls:
-            np.testing.assert_allclose(zk_arg, [0.0, 1e-7, 2e-7])
-            assert eps == pytest.approx(PUPIL_INNER.to_value(u.m) / PUPIL_OUTER.to_value(u.m))
-
-    def test_per_field_zk_broadcast(self, monkeypatch):
-        """(nfield, jmax+1) zk gives different perturbation per field point."""
-        model = _make_recording_model_stub()
-        nfield = 3
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        zk_coefs = np.array([
-            [0.0, 1e-7, 0.0],
-            [0.0, 0.0, 2e-7],
-            [0.0, 3e-7, 3e-7],
-        ]) * u.m  # (3, 3)
-        dummy_field = FieldCoords(
-            x=np.zeros(nfield) * u.deg, y=np.zeros(nfield) * u.deg,
-            frame="ocs", rtp=model.rtp,
-        )
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
-        )
-
-        assert len(model.builder.extra_zk_calls) == nfield
-        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, zk_coefs[i].to_value(u.m))
-
-    def test_batched_zk_broadcast(self, monkeypatch):
-        """(*batch, nfield, jmax+1) zk fully specified for each batch × field."""
-        model = _make_recording_model_stub()
-        batch_shape = (2,)
-        nfield = 3
-        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        rng = np.random.default_rng(42)
-        zk_vals = rng.normal(size=(2, 3, 4)) * 1e-7
-        zk_coefs = zk_vals * u.m
-        dummy_field = FieldCoords(
-            x=np.zeros((2, 3)) * u.deg, y=np.zeros((2, 3)) * u.deg,
-            frame="ocs", rtp=model.rtp,
-        )
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
-        )
-
-        total = 2 * 3
-        assert len(model.builder.extra_zk_calls) == total
-        flat_vals = zk_vals.reshape(total, 4)
-        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, flat_vals[i])
-
-    def test_uniform_zk_broadcast_over_batch(self, monkeypatch):
-        """(1, jmax+1) zk broadcasts across batch dims too."""
-        model = _make_recording_model_stub()
-        batch_shape = (2,)
-        nfield = 3
-        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px = np.array([-1.0, 0.0, 1.0])
-        py = np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        zk_coefs = np.array([[0.0, 5e-8, 0.0]]) * u.m  # (1, 3)
-        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=extra_zk, nrad=2, reference="chief",
-        )
-
-        total = 2 * 3
-        assert len(model.builder.extra_zk_calls) == total
-        for zk_arg, _ in model.builder.extra_zk_calls:
-            np.testing.assert_allclose(zk_arg, [0.0, 5e-8, 0.0])
-
-
-class TestZernikesExtraZk:
-    """Verify extra Zernike perturbation broadcasting in zernikes()."""
-
-    @staticmethod
-    def _patch_zernikeGQ(monkeypatch):
-        def fake_zernikeGQ(telescope, theta_x, theta_y, wavelength,
-                           rings, jmax, eps):
-            base = 10.0 * theta_x + 100.0 * theta_y
-            return base + np.arange(jmax + 1, dtype=float)
-        monkeypatch.setattr(raytraced_module.batoid, "zernikeGQ", fake_zernikeGQ)
-
-    def test_zk_none_no_extra_zk_calls(self, monkeypatch):
-        """When zk=None, with_extra_zk is never called."""
-        model = _make_recording_model_stub()
-        field = _make_batched_field((), 3, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, jmax=4, rings=3,
-        )
-        assert len(model.builder.extra_zk_calls) == 0
-
-    def test_uniform_zk_broadcast(self, monkeypatch):
-        """(1, jmax+1) zk broadcasts same perturbation to all field points."""
-        model = _make_recording_model_stub()
-        nfield = 3
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        zk_coefs = np.array([[0.0, 1e-7, 2e-7]]) * u.m
-        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
-        )
-
-        assert len(model.builder.extra_zk_calls) == nfield
-        for zk_arg, eps in model.builder.extra_zk_calls:
-            np.testing.assert_allclose(zk_arg, [0.0, 1e-7, 2e-7])
-
-    def test_per_field_zk_broadcast(self, monkeypatch):
-        """(nfield, jmax+1) zk gives different perturbation per field."""
-        model = _make_recording_model_stub()
-        nfield = 3
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        zk_coefs = np.array([
-            [0.0, 1e-7, 0.0],
-            [0.0, 0.0, 2e-7],
-            [0.0, 3e-7, 3e-7],
-        ]) * u.m
-        dummy_field = FieldCoords(
-            x=np.zeros(nfield) * u.deg, y=np.zeros(nfield) * u.deg,
-            frame="ocs", rtp=model.rtp,
-        )
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
-        )
-
-        assert len(model.builder.extra_zk_calls) == nfield
-        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, zk_coefs[i].to_value(u.m))
-
-    def test_batched_zk_broadcast(self, monkeypatch):
-        """(*batch, nfield, jmax+1) zk fully specified."""
-        model = _make_recording_model_stub()
-        batch_shape = (2,)
-        nfield = 3
-        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        rng = np.random.default_rng(42)
-        zk_vals = rng.normal(size=(2, 3, 4)) * 1e-7
-        zk_coefs = zk_vals * u.m
-        dummy_field = FieldCoords(
-            x=np.zeros((2, 3)) * u.deg, y=np.zeros((2, 3)) * u.deg,
-            frame="ocs", rtp=model.rtp,
-        )
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
-        )
-
-        total = 2 * 3
-        assert len(model.builder.extra_zk_calls) == total
-        flat_vals = zk_vals.reshape(total, 4)
-        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, flat_vals[i])
-
-    def test_uniform_zk_broadcast_over_batch(self, monkeypatch):
-        """(1, jmax+1) zk broadcasts across batch dims too."""
-        model = _make_recording_model_stub()
-        batch_shape = (2,)
-        nfield = 3
-        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        zk_coefs = np.array([[0.0, 5e-8, 0.0]]) * u.m
-        dummy_field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg, frame="ocs", rtp=model.rtp)
-        extra_zk = Zernikes(coefs=zk_coefs, field=dummy_field, frame="ocs", rtp=model.rtp)
-
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, zk=extra_zk, jmax=4, rings=3,
-        )
-
-        total = 2 * 3
-        assert len(model.builder.extra_zk_calls) == total
-        for zk_arg, _ in model.builder.extra_zk_calls:
-            np.testing.assert_allclose(zk_arg, [0.0, 5e-8, 0.0])
-
-
-# ---------------------------------------------------------------------------
-# DoubleZernikes as zk parameter tests
-# ---------------------------------------------------------------------------
-
-import galsim
-
-
-def _expected_dz_coefs_flat(dz, field):
-    """Compute expected per-field Zernike coefs (meters, flat) from a DoubleZernikes."""
-    x = field.x.to_value(u.deg)
-    y = field.y.to_value(u.deg)
-    B = np.moveaxis(
-        galsim.zernike.zernikeBasis(
-            dz.kmax, x, y,
-            R_outer=dz.field_outer.to_value(u.deg),
-            R_inner=dz.field_inner.to_value(u.deg),
-        ),
-        0, -1,
-    )  # (*field_shape, kmax+1)
-    coefs = B @ dz.coefs.to_value(u.m)  # (*broadcast_batch, nfield, jmax+1)
-    batch_shape = field.x.shape[:-1]
-    nfield = field.x.shape[-1]
-    target = batch_shape + (nfield, dz.jmax + 1)
-    coefs = np.broadcast_to(coefs, target)
-    total = int(np.prod(batch_shape)) * nfield
-    return coefs.reshape(total, -1)
-
-
-def _make_dz(kmax=3, jmax_dz=3, batch_shape=(), rng_seed=123):
-    """Create a DoubleZernikes with random coefs."""
-    rng = np.random.default_rng(rng_seed)
-    coefs = rng.standard_normal(batch_shape + (kmax + 1, jmax_dz + 1)) * 1e-7
-    return DoubleZernikes(
-        coefs=coefs * u.m,
-        field_outer=FIELD_OUTER,
-        field_inner=FIELD_INNER,
-        pupil_outer=PUPIL_OUTER,
-        pupil_inner=PUPIL_INNER,
-        frame="ocs",
-    )
-
-
-class TestSpotsDoubleZernikesZk:
-    """Verify DoubleZernikes zk parameter in spots()."""
-
-    @staticmethod
-    def _patch_hexapolar(monkeypatch, px, py):
-        monkeypatch.setattr(
-            raytraced_module.batoid.utils, "hexapolar",
-            lambda **kwargs: (px, py),
-        )
-
-    @staticmethod
-    def _patch_fromStop(monkeypatch):
-        def fake_fromStop(px_in, py_in, theta_x, theta_y, optic, wavelength):
-            px_arr = np.atleast_1d(np.asarray(px_in, dtype=float))
-            py_arr = np.atleast_1d(np.asarray(py_in, dtype=float))
-            if px_arr.size == 1 and py_arr.size == 1 and px_arr[0] == 0.0:
-                return SimpleNamespace(
-                    x=np.array([theta_x]),
-                    y=np.array([theta_y]),
-                    vignetted=np.array([False]),
-                )
-            return SimpleNamespace(
-                x=px_arr + theta_x,
-                y=py_arr + theta_y,
-                vignetted=np.zeros(len(px_arr), dtype=bool),
-            )
-        monkeypatch.setattr(
-            raytraced_module.batoid.RayVector, "fromStop",
-            staticmethod(fake_fromStop),
-        )
-
-    def test_dz_per_field_coefs(self, monkeypatch):
-        """DZ produces correct field-dependent Zernike coefs at each field point."""
-        model = _make_recording_model_stub()
-        nfield = 3
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px, py = np.array([-1.0, 0.0, 1.0]), np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        dz = _make_dz()
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=dz, nrad=2, reference="chief",
-        )
-
-        expected = _expected_dz_coefs_flat(dz, field)
-        assert len(model.builder.extra_zk_calls) == nfield
-        for i, (zk_arg, eps) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
-            assert eps == pytest.approx(PUPIL_INNER.to_value(u.m) / PUPIL_OUTER.to_value(u.m))
-
-    def test_dz_broadcasts_over_field_batch(self, monkeypatch):
-        """DZ without batch broadcasts correctly over field batch dims."""
-        model = _make_recording_model_stub()
-        batch_shape = (2,)
-        nfield = 3
-        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px, py = np.array([-1.0, 0.0, 1.0]), np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        dz = _make_dz()  # no DZ batch
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=dz, nrad=2, reference="chief",
-        )
-
-        expected = _expected_dz_coefs_flat(dz, field)
-        total = 2 * 3
-        assert len(model.builder.extra_zk_calls) == total
-        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
-
-    def test_dz_piston_only_uniform(self, monkeypatch):
-        """DZ with only k=1 (piston) gives uniform coefs across field points."""
-        model = _make_recording_model_stub()
-        nfield = 4
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        _patch_detnum_zero(monkeypatch)
-        px, py = np.array([-1.0, 0.0, 1.0]), np.array([0.0, 0.5, -0.5])
-        self._patch_hexapolar(monkeypatch, px, py)
-        self._patch_fromStop(monkeypatch)
-
-        # kmax=1: Z_0=0, Z_1=1 (piston). Only k=1 row is non-zero.
-        dz_coefs = np.array([
-            [0.0, 0.0, 0.0],
-            [0.0, 3e-7, 5e-7],
-        ]) * u.m
-        dz = DoubleZernikes(
-            coefs=dz_coefs,
-            field_outer=FIELD_OUTER, field_inner=FIELD_INNER,
-            pupil_outer=PUPIL_OUTER, pupil_inner=PUPIL_INNER,
-            frame="ocs",
-        )
-
-        RaytracedOpticalModel.spots(
-            model, field=field, state=None, zk=dz, nrad=2, reference="chief",
-        )
-
-        assert len(model.builder.extra_zk_calls) == nfield
-        for zk_arg, _ in model.builder.extra_zk_calls:
-            np.testing.assert_allclose(zk_arg, [0.0, 3e-7, 5e-7])
-
-
-class TestZernikesDoubleZernikesZk:
-    """Verify DoubleZernikes zk parameter in zernikes()."""
-
-    @staticmethod
-    def _patch_zernikeGQ(monkeypatch):
-        def fake_zernikeGQ(telescope, theta_x, theta_y, wavelength,
-                           rings, jmax, eps):
-            base = 10.0 * theta_x + 100.0 * theta_y
-            return base + np.arange(jmax + 1, dtype=float)
-        monkeypatch.setattr(raytraced_module.batoid, "zernikeGQ", fake_zernikeGQ)
-
-    def test_dz_per_field_coefs(self, monkeypatch):
-        """DZ produces correct field-dependent Zernike coefs at each field point."""
-        model = _make_recording_model_stub()
-        nfield = 3
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        dz = _make_dz()
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, zk=dz, jmax=4, rings=3,
-        )
-
-        expected = _expected_dz_coefs_flat(dz, field)
-        assert len(model.builder.extra_zk_calls) == nfield
-        for i, (zk_arg, eps) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
-            assert eps == pytest.approx(PUPIL_INNER.to_value(u.m) / PUPIL_OUTER.to_value(u.m))
-
-    def test_dz_broadcasts_over_field_batch(self, monkeypatch):
-        """DZ without batch broadcasts correctly over field batch dims."""
-        model = _make_recording_model_stub()
-        batch_shape = (2,)
-        nfield = 3
-        field = _make_batched_field(batch_shape, nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        dz = _make_dz()
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, zk=dz, jmax=4, rings=3,
-        )
-
-        expected = _expected_dz_coefs_flat(dz, field)
-        total = 2 * 3
-        assert len(model.builder.extra_zk_calls) == total
-        for i, (zk_arg, _) in enumerate(model.builder.extra_zk_calls):
-            np.testing.assert_allclose(zk_arg, expected[i], atol=1e-20)
-
-    def test_dz_piston_only_uniform(self, monkeypatch):
-        """DZ with only k=1 (piston) gives uniform coefs across field points."""
-        model = _make_recording_model_stub()
-        nfield = 4
-        field = _make_batched_field((), nfield, rtp=model.rtp)
-        state = State(value=np.zeros(50), basis="f")
-        _patch_detnum_zero(monkeypatch)
-        self._patch_zernikeGQ(monkeypatch)
-
-        dz_coefs = np.array([
-            [0.0, 0.0, 0.0],
-            [0.0, 3e-7, 5e-7],
-        ]) * u.m
-        dz = DoubleZernikes(
-            coefs=dz_coefs,
-            field_outer=FIELD_OUTER, field_inner=FIELD_INNER,
-            pupil_outer=PUPIL_OUTER, pupil_inner=PUPIL_INNER,
-            frame="ocs",
-        )
-
-        RaytracedOpticalModel.zernikes(
-            model, field=field, state=state, zk=dz, jmax=4, rings=3,
-        )
-
-        assert len(model.builder.extra_zk_calls) == nfield
-        for zk_arg, _ in model.builder.extra_zk_calls:
-            np.testing.assert_allclose(zk_arg, [0.0, 3e-7, 5e-7])
+    # --- return type ---
+
+    def test_returns_state_dx(self, result_dx):
+        from StarSharp.datatypes import State
+        assert isinstance(result_dx, State)
+
+    def test_returns_state_var(self, result_var):
+        from StarSharp.datatypes import State
+        assert isinstance(result_var, State)
+
+    def test_result_basis_is_x(self, result_dx, result_var):
+        assert result_dx.basis == "x"
+        assert result_var.basis == "x"
+
+    # --- recovery of offset ---
+
+    def test_recovers_cam_dz_dx_mode(self, result_dx):
+        """Optimized Cam_dz should be close to -offset (≈ -50 um)."""
+        cam_dz = result_dx.x.value[0]
+        assert abs(cam_dz - (-_CAM_DZ_OFFSET_UM)) < 5.0
+
+    def test_recovers_cam_dz_var_mode(self, result_var):
+        cam_dz = result_var.x.value[0]
+        assert abs(cam_dz - (-_CAM_DZ_OFFSET_UM)) < 5.0
+
+    # --- spot improvement ---
+
+    def test_reduces_spot_rms_dx_mode(self, defocused_model, guess, result_dx,
+                                      small_field):
+        rms_before = _spot_rms(defocused_model.spots(
+            field=small_field, state=guess, nrad=5
+        ))
+        rms_after = _spot_rms(defocused_model.spots(
+            field=small_field, state=result_dx, nrad=5
+        ))
+        assert rms_after < rms_before
+
+    def test_reduces_spot_rms_var_mode(self, defocused_model, guess, result_var,
+                                       small_field):
+        rms_before = _spot_rms(defocused_model.spots(
+            field=small_field, state=guess, nrad=5
+        ))
+        rms_after = _spot_rms(defocused_model.spots(
+            field=small_field, state=result_var, nrad=5
+        ))
+        assert rms_after < rms_before
