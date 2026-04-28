@@ -88,31 +88,6 @@ class RaytracedOpticalModel:
             offset = self.sf.zero("f")
         self.offset = offset
 
-        # Living a little dangerously here by assuming the builder's use_m1m3_modes and
-        # use_m2_modes are enough to indicate "standard" dofs and thus step sizes.
-        if self.builder.use_m1m3_modes == list(range(19)) + [
-            26
-        ] and self.builder.use_m2_modes == list(range(17)) + [25, 26, 27]:
-            self.steps = [
-                10.0,  # M2 dz
-                500.0,
-                500.0,  # M2 dx, dy
-                10.0,
-                10.0,  # M2 rx, ry
-                10.0,  # cam dz
-                500.0,
-                500.0,  # cam dx, dy
-                10.0,
-                10.0,  # cam rx, ry
-            ]
-            self.steps += [0.1] * 40  # bending modes
-            if self.builder.dof_angle_units == "degree":
-                self.steps[3:5] = [10./3600, 10./3600]  # M2 rx, ry
-                self.steps[8:10] = [10./3600, 10./3600]  # cam rx, ry
-            self.steps = np.array(self.steps)
-        else:
-            self.steps = None
-
     def make_hex_field(self, outer=2.0 * u.deg, nrad=20, naz=None):
         """Create a hexapolar grid of field coordinates.
 
@@ -700,7 +675,7 @@ class RaytracedOpticalModel:
         result = least_squares(
             func,
             x0,
-            x_scale=self.steps[guess.use_dof],
+            x_scale=guess.schema.step[guess.use_dof],
             args=(field, nrad, guess.use_dof),
             **kwargs,
         )
