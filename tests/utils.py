@@ -5,7 +5,6 @@ from __future__ import annotations
 from functools import cache
 
 import astropy.units as u
-import galsim
 import numpy as np
 from astropy.coordinates import Angle
 
@@ -19,18 +18,6 @@ RTP = Angle(0.25, unit=u.rad)
 def _load_camera() -> Camera:
     from lsst.obs.lsst import LsstCam
     return LsstCam().getCamera()
-
-
-def _make_wcs(rtp: Angle | None = None) -> galsim.BaseWCS:
-    if rtp is None:
-        rtp = Angle(0, unit=u.deg)
-    c = np.cos(rtp)
-    s = np.sin(rtp)
-    scale = np.deg2rad(20 / 3600)  # 20 arcsec/mm
-    rot = np.array([[c, -s], [s, c]]) * scale
-    return galsim.AffineTransform(
-        rot[0, 0], rot[0, 1], rot[1, 0], rot[1, 1], galsim.PositionD(0.0, 0.0)
-    )
 
 
 def _make_field(
