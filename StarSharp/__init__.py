@@ -8,6 +8,7 @@ from .datatypes import (
     Sensitivity,
     Spots,
     State,
+    StateSchema,
     StateFactory,
     Zernikes,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "Spots",
     "Zernikes",
     "State",
+    "StateSchema",
     "StateFactory",
     "Moments",
     "Moments2",

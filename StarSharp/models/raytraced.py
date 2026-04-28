@@ -11,7 +11,15 @@ from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
 from numpy.typing import NDArray
 from tqdm.std import tqdm as TqdmType
 
-from ..datatypes import DoubleZernikes, FieldCoords, Sensitivity, Spots, State, Zernikes
+from ..datatypes import (
+    DoubleZernikes,
+    FieldCoords,
+    Sensitivity,
+    Spots,
+    State,
+    StateSchema,
+    Zernikes,
+)
 
 PUPIL_OUTER = 4.18
 PUPIL_INNER = PUPIL_OUTER * 0.612
@@ -39,6 +47,8 @@ class RaytracedOpticalModel:
         Rotator position angle (OCS → CCS rotation).
     wavelength : Quantity
         Monochromatic wavelength for ray tracing (e.g. ``620 * u.nm``).
+    state_schema : StateSchema
+        Schema defining the AOS state DOFs and their mapping to the builder.
     camera : Camera or None
         LSST camera geometry object.  Required for methods that need
         detector-level information (e.g. :meth:`make_ccd_field`,
@@ -52,6 +62,7 @@ class RaytracedOpticalModel:
         builder: LSSTBuilder,
         rtp: Angle,
         wavelength: Quantity,
+        state_schema: StateSchema,
         camera: Camera | None = None,
         offset: State | None = None,
     ):
@@ -59,10 +70,12 @@ class RaytracedOpticalModel:
         self.rtp = rtp
         self.fiducial = builder.with_rtp(rtp).build()
         self.wavelength = wavelength
+        self.state_schema = state_schema
         self.camera = camera
         if offset is None:
             offset = State(
                 value=np.zeros(50, dtype=np.float64),
+                schema=state_schema,
                 basis="f",
             )
         self.offset = offset

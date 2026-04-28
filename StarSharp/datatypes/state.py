@@ -414,8 +414,6 @@ class State:
     schema: StateSchema
     basis: Basis = "x"
 
-
-
     def __post_init__(self):
         basis_values = get_args(Basis)
         if self.basis not in basis_values:
