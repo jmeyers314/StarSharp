@@ -486,7 +486,7 @@ class RaytracedOpticalModel:
             transverse aberration approach, "gq" uses Gaussian quadrature.
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
-            spot diagrams.
+            Zernike computation.
         camera_piston : Quantity or None
             Optional extra piston term applied to the entire camera.
         detector_piston : Quantity or None
@@ -786,7 +786,7 @@ class RaytracedOpticalModel:
             ring of (possibly vignetted) rays.
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
-            spot diagrams used for Zernike computation.
+            spot diagrams.
         tqdm : tqdm | None
             Optional tqdm progress bar.
 
@@ -842,7 +842,7 @@ class RaytracedOpticalModel:
         Parameters
         ----------
         kmax : int
-            Maximum field Noll index for the double-Zernike fit (default: 28).
+            Maximum field Noll index for the double-Zernike fit.
         field_outer : Quantity
             Outer field radius for the field-Zernike basis.  Required.
         field_inner : Quantity or None

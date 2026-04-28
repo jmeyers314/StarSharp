@@ -89,8 +89,16 @@ class DoubleZernikes:
     def to_galsim(
         self,
         idx: int | None = None,
-    ) -> galsim.GSObject:
-        """Return a galsim.GSObject representing the wavefront described by this DoubleZernikes."""
+    ) -> galsim.zernike.DoubleZernike:
+        """Return a `galsim.zernike.DoubleZernike` for one set of coefficients.
+
+        Parameters
+        ----------
+        idx : int or None
+            Index into the leading batch dimension.  Required when ``coefs``
+            has more than two dimensions; ignored for a single
+            ``(kmax+1, jmax+1)`` coefficient array.
+        """
         if idx is not None:
             coefs = self.coefs[idx]
         else:

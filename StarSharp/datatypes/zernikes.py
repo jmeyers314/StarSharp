@@ -134,6 +134,8 @@ class Zernikes:
             field point; ignored for a single (1, jmax+1) coefficient array.
         unit : astropy.units.Unit
             Unit for the output coefficients (default: micron).
+        radius_unit : astropy.units.Unit
+            Unit for ``R_outer`` and ``R_inner`` passed to galsim (default: meter).
         """
         if idx is not None:
             c = self.coefs[idx]
