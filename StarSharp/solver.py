@@ -1,7 +1,5 @@
 """ZernikeSolver: least-squares estimation of telescope State from Zernikes."""
 
-from __future__ import annotations
-
 from dataclasses import replace
 from typing import Literal
 
