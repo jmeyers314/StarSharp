@@ -570,10 +570,15 @@ class State:
                 dof_names=self.dof_names,
                 dof_units=self.dof_units,
                 use_dof=self.use_dof,
+                step=self.schema.step,
                 Vh=None,
             )
         else:
-            schema = StateSchema(dof_names=self.dof_names, dof_units=self.dof_units)
+            schema = StateSchema(
+                dof_names=self.dof_names,
+                dof_units=self.dof_units,
+                step=self.schema.step,
+            )
         return State(value=value, basis="f", schema=schema)
 
     def __mul__(self, scalar):
