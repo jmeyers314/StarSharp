@@ -14,9 +14,6 @@ from lsst.afw.cameraGeom import Camera, FIELD_ANGLE, FOCAL_PLANE
 
 @dataclass(frozen=True)
 class Spots:
-    VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
-    _sensitivity_fields = ("dx", "dy")
-    _broadcast_fields = ("vignetted",)
     """Spot diagrams: ray intersection positions on the focal plane.
 
     May represent one or many field points.  When batched,
@@ -42,6 +39,10 @@ class Spots:
         ``(n_ray,)`` shared across all field points.  Units are typically
         meters.  Always interpretted as OCS frame.
     """
+
+    VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
+    _sensitivity_fields = ("dx", "dy")
+    _broadcast_fields = ("vignetted",)
 
     dx: Quantity
     dy: Quantity
