@@ -71,7 +71,7 @@ class StateSchema:
                 raise ValueError("use_dof contains out-of-range indices")
 
         if self.step is None:
-            step = np.ones(len(names), dtype=float)
+            step = None
         else:
             step = np.asarray(self.step, dtype=float)
             if step.ndim != 1 or step.shape[0] != len(names):

@@ -87,9 +87,9 @@ class TestStateSchemaConstruction:
         assert schema.dof_units[0] == u.mm
         assert schema.dof_units[1] == u.arcsec
 
-    def test_default_step_is_ones(self):
+    def test_default_step_is_none(self):
         schema = _make_schema(5)
-        np.testing.assert_array_equal(schema.step, np.ones(5))
+        assert schema.step is None
 
     def test_step_coerced_to_float_array(self):
         schema = StateSchema(

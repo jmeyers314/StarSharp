@@ -675,7 +675,7 @@ class RaytracedOpticalModel:
         result = least_squares(
             func,
             x0,
-            x_scale=guess.schema.step[guess.use_dof],
+            x_scale=guess.schema.step[guess.use_dof] if guess.schema.step is not None else "jac",
             args=(field, nrad, guess.use_dof),
             **kwargs,
         )
