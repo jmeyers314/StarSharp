@@ -25,12 +25,12 @@ class Zernikes:
         index *j* (0 … jmax).  Leading axes are batch dimensions.
     field : FieldCoords
         Field coordinates for each set of coefficients.
-    R_outer : float
+    R_outer : Quantity
         Outer radius of the annular pupil.
-    R_inner : float
+    R_inner : Quantity
         Inner radius of the annular pupil.
     wavelength : Quantity or None
-        Wavelength of the coefficients.  Optional, but required for some
+        Wavelength of the coefficients.  Optional metadata.
     frame: str
         Coordinate frame of the coefficients.  Must be "ocs" or "ccs".
     rtp : Angle or None
