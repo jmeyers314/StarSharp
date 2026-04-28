@@ -38,6 +38,9 @@ class Spots:
         Pupil (stop-plane) coordinates of each ray.  1-D arrays of shape
         ``(n_ray,)`` shared across all field points.  Units are typically
         meters.  Always interpretted as OCS frame.
+    camera : Camera or None
+        Camera geometry required for space conversions (``focal_plane``,
+        ``angle``).
     """
 
     VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
