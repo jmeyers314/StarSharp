@@ -14,6 +14,7 @@ from tqdm.std import tqdm as TqdmType
 from ..datatypes import (
     DoubleZernikes,
     FieldCoords,
+    PointingModel,
     Sensitivity,
     Spots,
     State,
@@ -55,6 +56,10 @@ class RaytracedOpticalModel:
         :meth:`spots`).
     offset : State or None
         Optional fixed offset applied to the AOS DOFs before ray tracing.
+    pointing_model : PointingModel or None
+        Optional model used to perturb OCS field angles before ray tracing.
+        This is applied as a global correction that depends on the effective
+        optics state used for tracing.
     """
 
     def __init__(
@@ -65,6 +70,7 @@ class RaytracedOpticalModel:
         state_schema: StateSchema,
         camera: Camera | None = None,
         offset: State | None = None,
+        pointing_model: PointingModel | None = None,
     ):
         self.builder = builder
         self.rtp = rtp
@@ -72,6 +78,10 @@ class RaytracedOpticalModel:
         self.wavelength = wavelength
         self.state_schema = state_schema
         self.camera = camera
+        if pointing_model is not None:
+            # Reindex/rescale once so runtime uses a single immutable schema-aligned PM.
+            pointing_model = pointing_model.aligned(state_schema, strict=True)
+        self.pointing_model = pointing_model
         if offset is None:
             offset = State(
                 value=np.zeros(50, dtype=np.float64),
@@ -247,10 +257,18 @@ class RaytracedOpticalModel:
         builder = self.builder.with_rtp(self.rtp)
         if camera_piston is not None:
             builder = builder.with_camera_piston(camera_piston.to_value(u.micron))
-        if state is not None:
-            builder = builder.with_aos_dof((state + self.offset).f.value)
+        effective_state = self.offset if state is None else state + self.offset
+        builder = builder.with_aos_dof(effective_state.f.value)
+
+        # Keep FieldCoords transforms state-independent and apply any optional
+        # state-dependent pointing correction only at the raytrace input boundary.
+        pointing_model = getattr(self, "pointing_model", None)
+        if pointing_model is None:
+            dthx = 0.0 * u.rad
+            dthy = 0.0 * u.rad
         else:
-            builder = builder.with_aos_dof(self.offset.f.value)
+            # `pointing_model` is schema-aligned in __init__.
+            dthx, dthy = pointing_model._delta(effective_state)
 
         # Flatten batch dims so we iterate over every field point individually.
         batch_shape = field.x.shape[:-1]
@@ -289,12 +307,12 @@ class RaytracedOpticalModel:
                     )
                 if include_chip_heights:
                     if detnum == -1:
-                        yield ifield, thx, thy, None
+                        yield ifield, thx + dthx, thy + dthy, None
                         continue
                     telescope = this_builder.build_det(detnum)
                 else:
                     telescope = this_builder.build()
-                yield ifield, thx, thy, telescope
+                yield ifield, thx + dthx, thy + dthy, telescope
 
         return field, batch_shape, nfield, total, iterator()
 

@@ -1,6 +1,7 @@
 from .double_zernikes import DoubleZernikes
 from .field_coords import FieldCoords
 from .moments import Moments, Moments2, Moments3, Moments4
+from .pointing_model import PointingModel
 from .sensitivity import Sensitivity
 from .spots import Spots
 from .state import State, StateFactory, StateSchema
@@ -18,5 +19,6 @@ __all__ = [
     "Moments2",
     "Moments3",
     "Moments4",
+    "PointingModel",
     "Sensitivity",
 ]
