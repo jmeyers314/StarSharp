@@ -18,6 +18,7 @@ from ..datatypes import (
     Sensitivity,
     Spots,
     State,
+    StateFactory,
     StateSchema,
     Zernikes,
 )
@@ -77,17 +78,14 @@ class RaytracedOpticalModel:
         self.fiducial = builder.with_rtp(rtp).build()
         self.wavelength = wavelength
         self.state_schema = state_schema
+        self.sf = StateFactory(state_schema)
         self.camera = camera
         if pointing_model is not None:
             # Reindex/rescale once so runtime uses a single immutable schema-aligned PM.
             pointing_model = pointing_model.aligned(state_schema, strict=True)
         self.pointing_model = pointing_model
         if offset is None:
-            offset = State(
-                value=np.zeros(50, dtype=np.float64),
-                schema=state_schema,
-                basis="f",
-            )
+            offset = self.sf.zero("f")
         self.offset = offset
 
         # Living a little dangerously here by assuming the builder's use_m1m3_modes and
@@ -622,14 +620,11 @@ class RaytracedOpticalModel:
         use_dof: NDArray[np.integer] | None = None,
         offset: State | None = None,
     ):
-        value = np.zeros(50, dtype=np.float64)
+        value = np.zeros(self.state_schema.n_dof, dtype=np.float64)
         value[use_dof] = params
         if offset is not None:
             value += offset.f.value
-        state = State(
-            value=value,
-            basis="f",
-        )
+        state = self.sf.f(value)
         spots = self.spots(field=field, state=state, nrad=nrad)
         vignetted = spots.vignetted
         return np.concatenate(
@@ -647,14 +642,11 @@ class RaytracedOpticalModel:
         use_dof: NDArray[np.integer] | None = None,
         offset: State | None = None,
     ):
-        value = np.zeros(50, dtype=np.float64)
+        value = np.zeros(self.state_schema.n_dof, dtype=np.float64)
         value[use_dof] = params
         if offset is not None:
             value += offset.f.value
-        state = State(
-            value=value,
-            basis="f",
-        )
+        state = self.sf.f(value)
         spots = self.spots(field=field, state=state, nrad=nrad)
         sizes = []
         for ispot in range(len(spots)):
@@ -712,12 +704,7 @@ class RaytracedOpticalModel:
             args=(field, nrad, guess.use_dof),
             **kwargs,
         )
-        return State(
-            value=result.x,
-            basis="x",
-            use_dof=guess.use_dof,
-            n_dof=guess.n_dof,
-        )
+        return StateFactory(guess.schema).x(result.x)
 
     def zernikes_sensitivity(
         self,
@@ -778,16 +765,11 @@ class RaytracedOpticalModel:
             iterator = tqdm(enumerate(steps.value), total=len(steps.value), desc="Computing Zernike sensitivities")
         else:
             iterator = enumerate(steps.value)
+        sf = StateFactory(steps.schema)
         for i, step in iterator:
             dval = np.zeros_like(steps.value)
             dval[i] = step
-            dstate = State(
-                value=dval,
-                basis=steps.basis,
-                use_dof=steps.use_dof,
-                n_dof=steps.n_dof,
-                Vh=steps.Vh,
-            )
+            dstate = getattr(sf, steps.basis)(dval)
             perturbed.append(
                 self.zernikes(
                     field=field,
@@ -905,11 +887,8 @@ class RaytracedOpticalModel:
         )
         dz_nominal = zk_sens.nominal.double(kmax, field_outer, field_inner)
         dz_gradient = zk_sens.gradient.double(kmax, field_outer, field_inner)
-        return Sensitivity(
+        return replace(
+            zk_sens,
             gradient=dz_gradient,
             nominal=dz_nominal,
-            basis=zk_sens.basis,
-            use_dof=zk_sens.use_dof,
-            n_dof=zk_sens.n_dof,
-            Vh=zk_sens.Vh,
         )
