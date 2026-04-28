@@ -689,7 +689,8 @@ class RaytracedOpticalModel:
     def zernikes_sensitivity(
         self,
         field: FieldCoords,
-        steps: State,
+        basis: Literal["f", "x"] = "f",
+        use_dof: NDArray | None = None,
         jmax: int = 28,
         rings: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
@@ -699,17 +700,22 @@ class RaytracedOpticalModel:
     ) -> Sensitivity:
         """Compute the Zernike wavefront sensitivity matrix via finite differences.
 
-        For each DOF in *steps*, perturbs the alignment state by the
-        corresponding step size and records
-        ``(zernikes(offset + step) - zernikes(offset)) / step``.
+        For each DOF, perturbs the alignment state by ``state_schema.step``
+        and records ``(zernikes(offset + step) - zernikes(offset)) / step``.
 
         Parameters
         ----------
         field : FieldCoords
             Field coordinates at which to evaluate the sensitivity.
-        steps : State
-            Step sizes in the desired DOF basis.  Its ``basis`` and
-            ``use_dof`` define which DOFs are included.
+        basis : {'f', 'x'}
+            DOF basis for the returned sensitivity.  ``'f'`` (default) iterates
+            over all DOFs; ``'x'`` iterates only over the active DOFs in
+            ``state_schema.use_dof`` (or the *use_dof* override).  ``'v'`` is
+            not accepted here — compute in ``'f'`` or ``'x'`` and call ``.v``
+            on the result.
+        use_dof : array-like of int or None
+            Override ``state_schema.use_dof`` when *basis* is ``'x'``.
+            Ignored for ``basis='f'``.
         jmax : int
             Maximum Noll index (default: 28).
         rings : int
@@ -723,14 +729,37 @@ class RaytracedOpticalModel:
             transverse aberration approach, "gq" uses Gaussian quadrature.
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
-            spot diagrams used for Zernike computation.
+            Zernike computation.
         tqdm : tqdm | None
             Optional tqdm progress bar.
+
         Returns
         -------
         Sensitivity[Zernikes]
             Gradient shape ``(ndof, nfield, jmax+1)``.
         """
+        if basis == "v":
+            raise ValueError(
+                "basis='v' is not supported; compute in 'f' or 'x' basis "
+                "and call .v on the result"
+            )
+        if self.state_schema.step is None:
+            raise ValueError(
+                "state_schema.step must be set to compute sensitivities"
+            )
+        if use_dof is not None and basis != "x":
+            raise ValueError("use_dof can only be specified when basis='x'")
+
+        schema = self.state_schema
+        if use_dof is not None:
+            schema = replace(schema, use_dof=np.asarray(use_dof, dtype=int), Vh=None)
+
+        sf = StateFactory(schema)
+        if basis == "f":
+            steps = sf.f(schema.step)
+        else:
+            steps = sf.x(schema.step[schema.use_dof])
+
         nominal = self.zernikes(
             field=field,
             jmax=jmax,
@@ -745,11 +774,10 @@ class RaytracedOpticalModel:
             iterator = tqdm(enumerate(steps.value), total=len(steps.value), desc="Computing Zernike sensitivities")
         else:
             iterator = enumerate(steps.value)
-        sf = StateFactory(steps.schema)
         for i, step in iterator:
-            dval = np.zeros_like(steps.value)
+            dval = np.zeros(len(steps.value))
             dval[i] = step
-            dstate = getattr(sf, steps.basis)(dval)
+            dstate = getattr(sf, basis)(dval)
             perturbed.append(
                 self.zernikes(
                     field=field,
@@ -766,7 +794,8 @@ class RaytracedOpticalModel:
     def spots_sensitivity(
         self,
         field: FieldCoords,
-        steps: State,
+        basis: Literal["f", "x"] = "f",
+        use_dof: NDArray | None = None,
         nrad: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
         include_chip_heights: bool = True,
@@ -774,18 +803,26 @@ class RaytracedOpticalModel:
     ) -> Sensitivity:
         """Compute the spot-diagram sensitivity matrix via finite differences.
 
-        For each DOF in *steps*, perturbs the alignment state and records
-        ``(spots(offset + step) - spots(offset)) / step`` for ``dx`` and ``dy``.
+        For each DOF, perturbs the alignment state by ``state_schema.step``
+        and records ``(spots(offset + step) - spots(offset)) / step`` for
+        ``dx`` and ``dy``.
 
         Parameters
         ----------
         field : FieldCoords
             Field coordinates.
-        steps : State
-            Per-DOF step sizes.
+        basis : {'f', 'x'}
+            DOF basis for the returned sensitivity.  ``'f'`` (default) iterates
+            over all DOFs; ``'x'`` iterates only over the active DOFs in
+            ``state_schema.use_dof`` (or the *use_dof* override).  ``'v'`` is
+            not accepted here — compute in ``'f'`` or ``'x'`` and call ``.v``
+            on the result.
+        use_dof : array-like of int or None
+            Override ``state_schema.use_dof`` when *basis* is ``'x'``.
+            Ignored for ``basis='f'``.
         nrad : int
             Pupil sampling rings for :meth:`spots` (default: 10).
-        reference: Literal["chief", "mean", "ring"] = "ring"
+        reference : Literal["chief", "mean", "ring"]
             Whether to center spot diagrams on the chief ray intersection,
             the mean intersection of all unvignetted rays, or the mean of a
             ring of (possibly vignetted) rays.
@@ -800,6 +837,28 @@ class RaytracedOpticalModel:
         Sensitivity[Spots]
             Gradient shape ``(ndof, nfield, nray)`` for ``dx`` and ``dy``.
         """
+        if basis == "v":
+            raise ValueError(
+                "basis='v' is not supported; compute in 'f' or 'x' basis "
+                "and call .v on the result"
+            )
+        if self.state_schema.step is None:
+            raise ValueError(
+                "state_schema.step must be set to compute sensitivities"
+            )
+        if use_dof is not None and basis != "x":
+            raise ValueError("use_dof can only be specified when basis='x'")
+
+        schema = self.state_schema
+        if use_dof is not None:
+            schema = replace(schema, use_dof=np.asarray(use_dof, dtype=int), Vh=None)
+
+        sf = StateFactory(schema)
+        if basis == "f":
+            steps = sf.f(schema.step)
+        else:
+            steps = sf.x(schema.step[schema.use_dof])
+
         nominal = self.spots(
             field=field,
             nrad=nrad,
@@ -813,12 +872,9 @@ class RaytracedOpticalModel:
         else:
             iterator = enumerate(steps.value)
         for i, step in iterator:
-            dval = np.zeros_like(steps.value)
+            dval = np.zeros(len(steps.value))
             dval[i] = step
-            dstate = replace(
-                steps,
-                value=dval
-            )
+            dstate = getattr(sf, basis)(dval)
             perturbed.append(
                 self.spots(
                     field=field,
@@ -855,7 +911,9 @@ class RaytracedOpticalModel:
         tqdm : tqdm | None
             Optional tqdm progress bar forwarded to :meth:`zernikes_sensitivity`.
         **kwargs
-            Extra keyword arguments forwarded to :meth:`zernikes_sensitivity`.
+            Extra keyword arguments forwarded to :meth:`zernikes_sensitivity`,
+            including ``field``, ``basis``, ``use_dof``, ``jmax``, ``rings``,
+            ``reference``, ``algorithm``, and ``include_chip_heights``.
 
         Returns
         -------
