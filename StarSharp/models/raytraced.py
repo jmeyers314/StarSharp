@@ -27,6 +27,10 @@ PUPIL_OUTER = 4.18
 PUPIL_INNER = PUPIL_OUTER * 0.612
 EXTRA_FOCAL_DETS = [191, 195, 199, 203]
 INTRA_FOCAL_DETS = [192, 196, 200, 204]
+DEFAULT_FOCUS_OFFSET = 1500.0  # microns; canonical WFS intra/extra-focal piston
+RING_RADIUS = 0.3              # fractional pupil radius for ring reference
+FOCAL_LENGTH = 10.31           # meters; LSST effective focal length
+N_RING_RAYS = 24               # azimuthal rays used for ring centroid reference
 
 
 class RaytracedOpticalModel:
@@ -271,9 +275,9 @@ class RaytracedOpticalModel:
                     )
                 if detector_piston is None:
                     if detnum in INTRA_FOCAL_DETS:
-                        this_builder = this_builder.with_detector_piston(-1500)
+                        this_builder = this_builder.with_detector_piston(-DEFAULT_FOCUS_OFFSET)
                     elif detnum in EXTRA_FOCAL_DETS:
-                        this_builder = this_builder.with_detector_piston(+1500)
+                        this_builder = this_builder.with_detector_piston(+DEFAULT_FOCUS_OFFSET)
                 else:
                     this_builder = this_builder.with_detector_piston(
                         detector_piston.to_value(u.micron)
@@ -393,12 +397,12 @@ class RaytracedOpticalModel:
                 fpx_ = cr.x[0]
                 fpy_ = cr.y[0]
             elif reference == "ring":
-                # Use a ring of rays ~30% of the way out in the pupil,
+                # Use a ring of rays RING_RADIUS of the way out in the pupil,
                 # which should be more stable than the (always vignetted) chief
                 # ray but less noisy than the mean of all unvignetted rays.
                 # This radius is generally unvignetted for a long time.
-                ring_radius = 0.3 * (PUPIL_OUTER - PUPIL_INNER) + PUPIL_INNER
-                ph = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+                ring_radius = RING_RADIUS * (PUPIL_OUTER - PUPIL_INNER) + PUPIL_INNER
+                ph = np.linspace(0, 2 * np.pi, N_RING_RAYS, endpoint=False)
                 ring = batoid.RayVector.fromStop(
                     ring_radius * np.cos(ph),
                     ring_radius * np.sin(ph),
@@ -540,7 +544,7 @@ class RaytracedOpticalModel:
                         naz=int(2 * np.pi * rings / (1 - PUPIL_INNER / PUPIL_OUTER)),
                         jmax=jmax,
                         eps=PUPIL_INNER / PUPIL_OUTER,
-                        focal_length=10.31,
+                        focal_length=FOCAL_LENGTH,
                         reference=reference,
                         projection="gnomonic",
                     )
