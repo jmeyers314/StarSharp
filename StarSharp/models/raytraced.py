@@ -858,6 +858,7 @@ class RaytracedOpticalModel:
             Gradient shape ``(ndof, kmax+1, jmax+1)``.
         """
         zk_sens = self.zernikes_sensitivity(
+            tqdm=tqdm,
             **kwargs
         )
         dz_nominal = zk_sens.nominal.double(kmax, field_outer, field_inner)
