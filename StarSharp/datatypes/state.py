@@ -28,6 +28,9 @@ class StateSchema:
         ``astropy.units.Unit``.
     use_dof : sequence of int or None
         Active DOF indices for x-basis.  If None, all DOFs are active.
+    step : ndarray or None
+        Default finite-difference step sizes in f-basis order, shape
+        ``(n_dof,)``. If None, defaults to all-ones.
     Vh : ndarray or None
         Mode mixing matrix for v-basis.  If None, v-basis is not supported.
         Must have shape (n_keep, n_active) where n_active = len(use_dof).
@@ -42,6 +45,7 @@ class StateSchema:
     dof_names: tuple[str, ...]
     dof_units: tuple[u.UnitBase, ...]
     use_dof: NDArray[np.integer] | None = None
+    step: NDArray[np.floating] | None = None
     Vh: NDArray[np.floating] | None = None
     S: NDArray[np.floating] | None = None
     U: NDArray[np.floating] | None = None
@@ -65,6 +69,15 @@ class StateSchema:
                 raise ValueError("use_dof must be a 1D index array")
             if np.any(use_dof < 0) or np.any(use_dof >= len(names)):
                 raise ValueError("use_dof contains out-of-range indices")
+
+        if self.step is None:
+            step = np.ones(len(names), dtype=float)
+        else:
+            step = np.asarray(self.step, dtype=float)
+            if step.ndim != 1 or step.shape[0] != len(names):
+                raise ValueError(
+                    f"step must have shape (n_dof={len(names)},), got {step.shape}"
+                )
 
         if self.Vh is not None:
             Vh = np.asarray(self.Vh, dtype=float)
@@ -104,6 +117,7 @@ class StateSchema:
         object.__setattr__(self, "dof_names", names)
         object.__setattr__(self, "dof_units", units)
         object.__setattr__(self, "use_dof", use_dof)
+        object.__setattr__(self, "step", step)
         object.__setattr__(self, "Vh", Vh)
         object.__setattr__(self, "S", S)
         object.__setattr__(self, "U", U)

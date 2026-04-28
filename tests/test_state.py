@@ -87,6 +87,20 @@ class TestStateSchemaConstruction:
         assert schema.dof_units[0] == u.mm
         assert schema.dof_units[1] == u.arcsec
 
+    def test_default_step_is_ones(self):
+        schema = _make_schema(5)
+        np.testing.assert_array_equal(schema.step, np.ones(5))
+
+    def test_step_coerced_to_float_array(self):
+        schema = StateSchema(
+            dof_names=("a", "b", "c"),
+            dof_units=(u.mm, u.mm, u.mm),
+            step=[1, 2, 3],
+        )
+        assert isinstance(schema.step, np.ndarray)
+        assert schema.step.dtype == float
+        np.testing.assert_array_equal(schema.step, np.array([1.0, 2.0, 3.0]))
+
     def test_frozen(self):
         schema = _make_schema(3)
         with pytest.raises((AttributeError, TypeError)):
@@ -103,6 +117,14 @@ class TestStateSchemaConstruction:
     def test_bad_use_dof_2d_raises(self):
         with pytest.raises(ValueError, match="1D"):
             _make_schema(5, use_dof=[[0, 1], [2, 3]])
+
+    def test_bad_step_shape_raises(self):
+        with pytest.raises(ValueError, match="step must have shape"):
+            StateSchema(
+                dof_names=("a", "b", "c"),
+                dof_units=(u.mm, u.mm, u.mm),
+                step=[1.0, 2.0],
+            )
 
     def test_use_dof_out_of_range_raises(self):
         with pytest.raises(ValueError, match="out-of-range"):
