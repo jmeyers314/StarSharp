@@ -128,6 +128,7 @@ def default_raytraced_model(
     offset: State | None = None,
     pointing_model: PointingModel | None = None,
     use_default_pointing_model: bool = False,
+    rtp_lookup=None,
 ) -> RaytracedOpticalModel:
     """Construct the canonical fiducial LSST ``RaytracedOpticalModel``.
 
@@ -166,6 +167,8 @@ def default_raytraced_model(
     use_default_pointing_model : bool, optional
         If True, load and attach the packaged default pointing model aligned to
         the chosen state schema.
+    rtp_lookup : RTPLookup or None, optional
+        Optional RTP-indexed lookup table passed through to the model.
     """
     if wavelength is None:
         wavelength = DEFAULT_WAVELENGTHS_NM[band]
@@ -200,6 +203,7 @@ def default_raytraced_model(
         camera=camera,
         offset=offset,
         pointing_model=pointing_model,
+        rtp_lookup=rtp_lookup,
     )
 
 

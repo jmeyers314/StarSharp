@@ -65,6 +65,10 @@ class RaytracedOpticalModel:
         Optional model used to perturb OCS field angles before ray tracing.
         This is applied as a global correction that depends on the effective
         optics state used for tracing.
+    rtp_lookup : RTPLookup or None
+        Optional RTP-indexed lookup table that contributes an additional AOS
+        offset interpolated at the current ``rtp``.  Applied additively with
+        ``offset`` (lookup is applied first).
     """
 
     def __init__(
@@ -76,6 +80,7 @@ class RaytracedOpticalModel:
         camera: Camera | None = None,
         offset: State | None = None,
         pointing_model: PointingModel | None = None,
+        rtp_lookup=None,
     ):
         self.builder = builder
         self.rtp = rtp
@@ -88,6 +93,9 @@ class RaytracedOpticalModel:
             # Reindex/rescale once so runtime uses a single immutable schema-aligned PM.
             pointing_model = pointing_model.aligned(state_schema, strict=True)
         self.pointing_model = pointing_model
+        if rtp_lookup is not None:
+            lookup_state = rtp_lookup.state_at(rtp, state_schema)
+            offset = lookup_state if offset is None else offset + lookup_state
         if offset is None:
             offset = self.sf.zero("f")
         self.offset = offset
