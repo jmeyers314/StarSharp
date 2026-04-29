@@ -29,7 +29,7 @@ EXTRA_FOCAL_DETS = [191, 195, 199, 203]
 INTRA_FOCAL_DETS = [192, 196, 200, 204]
 DEFAULT_FOCUS_OFFSET = 1500.0  # microns; canonical WFS intra/extra-focal piston
 RING_RADIUS = 0.3              # fractional pupil radius for ring reference
-FOCAL_LENGTH = 10.31           # meters; LSST effective focal length
+FOCAL_LENGTH = 10.312          # meters; LSST effective focal length
 N_RING_RAYS = 24               # azimuthal rays used for ring centroid reference
 
 
