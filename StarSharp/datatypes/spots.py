@@ -257,7 +257,9 @@ class Spots:
         Moments
             Moments of the spot diagram.
         """
-        from .moments import Moments
+        import itertools
+
+        from .moments import Moments, _moment_names
 
         if order < 1:
             raise ValueError("Order must be at least 1")
@@ -272,10 +274,12 @@ class Spots:
         dx[self.vignetted] = np.nan
         dy[self.vignetted] = np.nan
 
-        vals = {}
-        for ny in range(order + 1):
-            nx = order - ny
-            name = "x" * nx + "y" * ny
-            vals[name] = np.nanmean(dx**nx * dy**ny, axis=-1) << (u.micron**order)
+        unit = u.micron**order
+        names = _moment_names(order)
+        values = np.stack(
+            [np.nanmean(dx ** name.count("x") * dy ** name.count("y"), axis=-1)
+             for name in names],
+            axis=0,
+        ) * unit
 
-        return Moments[order](**vals, frame=self.frame, field=self.field, rtp=self.rtp)
+        return Moments[order]._create(order, values, self.frame, self.field, self.rtp)
