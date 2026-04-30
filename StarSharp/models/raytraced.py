@@ -607,6 +607,7 @@ class RaytracedOpticalModel:
         nrad: int = 10,
         use_dof: NDArray[np.integer] | None = None,
         offset: State | None = None,
+        vignetted_mask: NDArray[np.bool_] | None = None,
     ):
         value = np.zeros(self.state_schema.n_dof, dtype=np.float64)
         value[use_dof] = params
@@ -614,11 +615,11 @@ class RaytracedOpticalModel:
             value += offset.f.value
         state = self.sf.f(value)
         spots = self.spots(field=field, state=state, nrad=nrad)
-        vignetted = spots.vignetted
+        mask = vignetted_mask if vignetted_mask is not None else spots.vignetted
         return np.concatenate(
             [
-                spots.dx[~vignetted].to_value(u.micron),
-                spots.dy[~vignetted].to_value(u.micron),
+                spots.dx[~mask].to_value(u.micron),
+                spots.dy[~mask].to_value(u.micron),
             ]
         )
 
@@ -680,16 +681,21 @@ class RaytracedOpticalModel:
         State
             Optimised state in the ``'x'`` (active-DOF) basis.
         """
+        from functools import partial
+
         from scipy.optimize import least_squares
 
-        func = self._optimize_dx_func if mode == "dx" else self._optimize_func
+        if mode == "dx":
+            initial_vignetted = self.spots(field=field, state=guess, nrad=nrad).vignetted
+            func = partial(self._optimize_dx_func, field=field, nrad=nrad, use_dof=guess.use_dof, vignetted_mask=initial_vignetted)
+        else:
+            func = partial(self._optimize_func, field=field, nrad=nrad, use_dof=guess.use_dof)
 
         x0 = guess.x.value
         result = least_squares(
             func,
             x0,
             x_scale=guess.schema.step[guess.use_dof] if guess.schema.step is not None else "jac",
-            args=(field, nrad, guess.use_dof),
             **kwargs,
         )
         return StateFactory(guess.schema).x(result.x)
