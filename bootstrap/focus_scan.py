@@ -179,7 +179,6 @@ def main():
         rtp=Angle(0.0, unit=u.deg),
     )
     builder = ref_model.builder
-    camera = ref_model.camera
     wavelength = ref_model.wavelength
     state_schema = ref_model.state_schema
 
@@ -228,7 +227,6 @@ def main():
             rtp=rtp,
             wavelength=wavelength,
             state_schema=state_schema,
-            camera=camera,
             rtp_lookup=rtp_lookup,
             pointing_model=pointing_model,
         )

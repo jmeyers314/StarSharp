@@ -38,9 +38,6 @@ class Spots:
         Pupil (stop-plane) coordinates of each ray.  1-D arrays of shape
         ``(n_ray,)`` shared across all field points.  Units are typically
         meters.  Always interpretted as OCS frame.
-    camera : Camera or None
-        Camera geometry required for space conversions (``focal_plane``,
-        ``angle``).
     """
 
     VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
@@ -54,7 +51,6 @@ class Spots:
     wavelength: Quantity | None = None
     frame: str = "ccs"
     rtp: Angle | None = None
-    camera: Camera | None = None
     px: Quantity | None = None
     py: Quantity | None = None
 
@@ -169,10 +165,11 @@ class Spots:
     @property
     def focal_plane(self) -> Spots:
         """This spot in focal-plane space."""
+        from ..models.fiducial import default_camera
         if self.space == "focal_plane":
             return self
         # Work in DVCS where camera transforms are defined
-        camera = self._require("camera")
+        camera = default_camera()
         transform = camera.getTransform(FIELD_ANGLE, FOCAL_PLANE).getMapping()
 
         # spot angle centers
@@ -209,10 +206,11 @@ class Spots:
     @property
     def angle(self) -> Spots:
         """This spot in field-angle space (OCS frame)."""
+        from ..models.fiducial import default_camera
         if self.space == "angle":
             return self
         # Work in DVCS where camera transforms are defined
-        camera = self._require("camera")
+        camera = default_camera()
         transform = camera.getTransform(FOCAL_PLANE, FIELD_ANGLE).getMapping()
 
         # spot focal plane centers

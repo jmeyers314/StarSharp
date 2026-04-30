@@ -7,7 +7,7 @@ import numpy as np
 from astropy.coordinates import Angle
 from astropy.units import Quantity
 from batoid_rubin import LSSTBuilder
-from lsst.afw.cameraGeom import FOCAL_PLANE, Camera
+from lsst.afw.cameraGeom import FOCAL_PLANE
 from numpy.typing import NDArray
 from tqdm.std import tqdm as TqdmType
 
@@ -55,10 +55,6 @@ class RaytracedOpticalModel:
         Monochromatic wavelength for ray tracing (e.g. ``620 * u.nm``).
     state_schema : StateSchema
         Schema defining the AOS state DOFs and their mapping to the builder.
-    camera : Camera or None
-        LSST camera geometry object.  Required for methods that need
-        detector-level information (e.g. :meth:`make_ccd_field`,
-        :meth:`spots`).
     offset : State or None
         Optional fixed offset applied to the AOS DOFs before ray tracing.
     pointing_model : PointingModel or None
@@ -77,7 +73,6 @@ class RaytracedOpticalModel:
         rtp: Angle,
         wavelength: Quantity,
         state_schema: StateSchema,
-        camera: Camera | None = None,
         offset: State | None = None,
         pointing_model: PointingModel | None = None,
         rtp_lookup=None,
@@ -88,7 +83,6 @@ class RaytracedOpticalModel:
         self.wavelength = wavelength
         self.state_schema = state_schema
         self.sf = StateFactory(state_schema)
-        self.camera = camera
         if pointing_model is not None:
             # Reindex/rescale once so runtime uses a single immutable schema-aligned PM.
             pointing_model = pointing_model.aligned(state_schema, strict=True)
@@ -127,7 +121,6 @@ class RaytracedOpticalModel:
             thy * u.deg,
             frame="ocs",
             rtp=self.rtp,
-            camera=self.camera
         )
 
     def make_ccd_field(
@@ -137,8 +130,6 @@ class RaytracedOpticalModel:
         detnums: list[int] | None = None,
     ):
         """Create a field grid with one point per CCD (or per CCD sub-cell).
-
-        Requires ``camera`` to be set on the model.
 
         Parameters
         ----------
@@ -154,15 +145,15 @@ class RaytracedOpticalModel:
         -------
         FieldCoords
         """
+        from .fiducial import default_camera
         if isinstance(types, str): # Turn "ITL" into ("ITL",)
             types = (types,)
-        if self.camera is None:
-            raise ValueError("Camera must be set on the model to use this method")
+        camera = default_camera()
         if detnums is None:
-            detnums = list(range(len(self.camera)))
+            detnums = list(range(len(camera)))
         x = []
         y = []
-        for det in self.camera:
+        for det in camera:
             if det.getId() not in detnums:
                 continue
             if det.getPhysicalType() not in types:
@@ -184,7 +175,6 @@ class RaytracedOpticalModel:
             np.array(y) << u.mm,
             frame="ccs",
             rtp=self.rtp,
-            camera=self.camera
         )
         return fc
 
@@ -194,14 +184,10 @@ class RaytracedOpticalModel:
         """Create a field with one point per wavefront sensor pair,
         located at the mean center of the pair.
 
-        Requires ``camera`` to be set on the model and include WFS detectors.
-
         Returns
         -------
         FieldCoords
         """
-        if self.camera is None:
-            raise ValueError("Camera must be set on the model to use this method")
         x = []
         y = []
         for det1, det2 in [
@@ -218,7 +204,6 @@ class RaytracedOpticalModel:
             np.array(y) << u.mm,
             frame="ccs",
             rtp=self.rtp,
-            camera=self.camera
         )
 
     def _iter_thx_thy_telescope(
@@ -440,7 +425,6 @@ class RaytracedOpticalModel:
             y=fpy.reshape(batch_shape + (nfield,)) * 1e3 << u.mm,
             frame="ccs",
             rtp=self.rtp,
-            camera=field.camera,
         )
         return Spots(
             dx.reshape(batch_shape + (nfield, nray)) * 1e6 << u.micron,
@@ -450,7 +434,6 @@ class RaytracedOpticalModel:
             wavelength=self.wavelength,
             frame="ccs",
             rtp=self.rtp,
-            camera=self.camera,
             px=np.array(px) << u.m,
             py=np.array(py) << u.m,
         )

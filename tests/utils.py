@@ -25,12 +25,11 @@ def _make_field(
     frame: str = "ocs",
     rtp: Angle | None = None,
     unit: u.Unit = u.deg,
-    camera: Camera | None = None,
 ) -> FieldCoords:
     rng = np.random.default_rng(42)
     x = rng.uniform(-1.5, 1.5, n) * unit
     y = rng.uniform(-1.5, 1.5, n) * unit
-    return FieldCoords(x=x, y=y, frame=frame, rtp=rtp, camera=camera)
+    return FieldCoords(x=x, y=y, frame=frame, rtp=rtp)
 
 
 def _make_spots(
@@ -39,13 +38,12 @@ def _make_spots(
     frame: str = "ccs",
     rtp: Angle | None = None,
     unit: u.Unit = u.um,
-    camera: Camera | None = None,
 ) -> Spots:
     rng = np.random.default_rng(12)
     dx = rng.normal(size=(n_field, n_ray)) * unit
     dy = rng.normal(size=(n_field, n_ray)) * unit
     vig = np.zeros((n_field, n_ray), dtype=bool)
-    field = _make_field(n_field, frame="ocs", rtp=rtp, camera=camera)
+    field = _make_field(n_field, frame="ocs", rtp=rtp)
     return Spots(
         dx=dx,
         dy=dy,
@@ -54,7 +52,6 @@ def _make_spots(
         wavelength=622.0 * u.nm,
         frame=frame,
         rtp=rtp,
-        camera=camera,
     )
 
 

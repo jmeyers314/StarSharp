@@ -24,7 +24,7 @@ from StarSharp.datatypes import (
     StateFactory,
     Zernikes,
 )
-from StarSharp.models.fiducial import default_raytraced_model
+from StarSharp.models.fiducial import default_raytraced_model, default_camera
 from StarSharp.models.raytraced import RaytracedOpticalModel
 
 
@@ -47,7 +47,6 @@ def on_axis_field(model) -> FieldCoords:
         y=0.0 * u.deg,
         frame="ocs",
         rtp=model.rtp,
-        camera=model.camera,
     )
 
 
@@ -59,7 +58,6 @@ def small_field(model) -> FieldCoords:
         y=np.array([0.0, 0.3,  0.3]) * u.deg,
         frame="ocs",
         rtp=model.rtp,
-        camera=model.camera,
     )
 
 
@@ -81,10 +79,6 @@ class TestMakeHexField:
         fc = model.make_hex_field()
         assert np.isclose(fc.rtp.rad, model.rtp.rad)
 
-    def test_camera_matches_model(self, model):
-        fc = model.make_hex_field()
-        assert fc.camera is model.camera
-
     def test_nrad_controls_npoints(self, model):
         fc5 = model.make_hex_field(nrad=5)
         fc10 = model.make_hex_field(nrad=10)
@@ -105,14 +99,11 @@ class TestMakeCcdField:
         fc = model.make_ccd_field()
         assert fc.frame == "ccs"
 
-    def test_camera_set(self, model):
-        fc = model.make_ccd_field()
-        assert fc.camera is model.camera
-
     def test_nx1_gives_one_point_per_detector(self, model):
         fc = model.make_ccd_field(nx=1)
+        camera = default_camera()
         n_detectors = sum(
-            1 for det in model.camera
+            1 for det in camera
             if det.getPhysicalType() in ("E2V", "ITL")
         )
         assert len(fc.x) == n_detectors
@@ -155,9 +146,6 @@ class TestSpots:
 
     def test_rtp_set(self, spots, model):
         assert np.isclose(spots.rtp.rad, model.rtp.rad)
-
-    def test_camera_is_model_camera(self, spots, model):
-        assert spots.camera is model.camera
 
     def test_wavelength_set(self, spots, model):
         assert spots.wavelength == model.wavelength
@@ -507,7 +495,6 @@ class TestOptimize:
             rtp=model.rtp,
             wavelength=model.wavelength,
             state_schema=model.state_schema,
-            camera=model.camera,
             offset=sf.f(dof_val),
         )
 

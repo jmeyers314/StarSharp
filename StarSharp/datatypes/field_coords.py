@@ -6,7 +6,7 @@ import astropy.units as u
 import numpy as np
 from astropy.coordinates import Angle
 from astropy.units import Quantity
-from lsst.afw.cameraGeom import FOCAL_PLANE, FIELD_ANGLE, Camera
+from lsst.afw.cameraGeom import FOCAL_PLANE, FIELD_ANGLE
 from numpy.typing import NDArray
 
 
@@ -25,10 +25,6 @@ class FieldCoords:
         ``'dvcs'`` (detector), or ``'edcs'`` (engineering).
     rtp : Angle or None
         Rotation angle from OCS to CCS frame.  Required for frame conversions.
-    camera : Camera or None
-        Camera geometry for conversions between field angle and focal plane
-        and for determining detector numbers.  Required for
-        ``detnum`` property.
     """
 
     VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
@@ -37,7 +33,6 @@ class FieldCoords:
     y: Quantity
     frame: str = "ocs"
     rtp: Angle | None = None
-    camera: Camera | None = None
 
     def __post_init__(self):
         if not isinstance(self.x, Quantity) or not isinstance(self.y, Quantity):
@@ -141,6 +136,7 @@ class FieldCoords:
         """This coordinate in focal-plane space."""
         # We will do all space conversions via the dvcs frame,
         # which is where they're defined in data management.
+        from ..models.fiducial import default_camera
         if self.space == "focal_plane":
             return self
         field = self.dvcs
@@ -148,7 +144,7 @@ class FieldCoords:
             field.x.to_value(u.radian),
             field.y.to_value(u.radian),
         ])
-        camera = self._require("camera")
+        camera = default_camera()
         transform = camera.getTransform(FIELD_ANGLE, FOCAL_PLANE).getMapping()
         fp_arr = transform.applyForward(field_arr)
         fp_x = fp_arr[0] << u.mm
@@ -159,6 +155,7 @@ class FieldCoords:
     @property
     def angle(self) -> FieldCoords:
         """This coordinate in field-angle space (OCS frame)."""
+        from ..models.fiducial import default_camera
         if self.space == "angle":
             return self
         # We will do all space conversions via the dvcs frame,
@@ -168,7 +165,7 @@ class FieldCoords:
             fp.x.to_value(u.mm),
             fp.y.to_value(u.mm),
         ])
-        camera = self._require("camera")
+        camera = default_camera()
         transform = camera.getTransform(FOCAL_PLANE, FIELD_ANGLE).getMapping()
         field_arr = transform.applyForward(fp_arr)
         field_x = field_arr[0] << u.radian
@@ -179,7 +176,8 @@ class FieldCoords:
     @property
     def detnum(self) -> int | NDArray[np.integer]:
         """Detector number(s). Returns -1 for points off any detector."""
-        camera = self._require("camera")
+        from ..models.fiducial import default_camera
+        camera = default_camera()
         fp = self.focal_plane.ccs
         orig_shape = fp.x.shape
         x = fp.x.to_value(u.mm).ravel()

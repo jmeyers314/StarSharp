@@ -188,7 +188,6 @@ def default_raytraced_model(
     version: str = "design",
     rtp: Angle = Angle("0 deg"),
     wavelength: u.Quantity | None = None,
-    camera=None,
     state_schema: StateSchema | None = None,
     offset: State | None = None,
     pointing_model: PointingModel | None = None,
@@ -220,8 +219,6 @@ def default_raytraced_model(
         Rotator position angle.
     wavelength : Quantity or None, optional
         Monochromatic tracing wavelength. Defaults to a band-specific value.
-    camera : optional
-        Camera geometry object. If None, the default LSST camera is loaded.
     state_schema : StateSchema or None, optional
         State schema for the model. Defaults to the standard 50-DOF LSST AOS
         schema.
@@ -239,8 +236,6 @@ def default_raytraced_model(
         wavelength = DEFAULT_WAVELENGTHS_NM[band]
     if state_schema is None:
         state_schema = default_schema()
-    if camera is None:
-        camera = default_camera()
 
     if pointing_model is not None and use_default_pointing_model:
         raise ValueError(
@@ -265,7 +260,6 @@ def default_raytraced_model(
         rtp=rtp,
         wavelength=wavelength,
         state_schema=state_schema,
-        camera=camera,
         offset=offset,
         pointing_model=pointing_model,
         rtp_lookup=rtp_lookup,
