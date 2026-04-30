@@ -1,3 +1,5 @@
+.env
+.vscode
 .ipynb_checkpoints
 __pycache__
 *.png
@@ -5,3 +7,4 @@ __pycache__
 *.egg-info
 old/
 fits_data/
+setup.sh
