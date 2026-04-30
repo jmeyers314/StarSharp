@@ -1,12 +1,16 @@
 from importlib.resources import files
+from pathlib import Path
 from typing import Literal
 from functools import cache
+import os
 
 import astropy.units as u
 import batoid
 import numpy as np
+import yaml
 from astropy.coordinates import Angle
 from astropy.table import QTable
+from numpy.typing import NDArray
 
 from ..datatypes import PointingModel, State, StateSchema
 from .raytraced import RaytracedOpticalModel
@@ -117,6 +121,67 @@ def default_pointing_model(
     return pm
 
 
+def default_normalizations(
+    fwhm_exponent: float = 0.5,
+    range_exponent: float = 0.5,
+    *,
+    schema: StateSchema | None = None,
+) -> NDArray[np.floating]:
+    """Return per-DOF normalization weights ``fwhm**fwhm_exponent * range**range_exponent``.
+
+    Weights are read from ``fwhm.yaml`` and ``range.yaml``.  Both files contain
+    a plain YAML list of 50 floats in the standard 50-DOF order defined by
+    :func:`default_schema`.
+
+    The files are resolved in this order:
+
+    1. ``$TS_OFC_DIR/policy/normalization_weights/`` if the environment variable
+       is set and the directory exists.
+    2. The bundled ``StarSharp/data/normalization_weights/`` fallback.
+
+    Parameters
+    ----------
+    fwhm_exponent, range_exponent : float
+        Exponents applied to the FWHM-sensitivity and working-range weights
+        respectively.  Defaults of ``(0.5, 0.5)`` give the geometric mean of both.
+    schema : StateSchema or None
+        Schema whose DOF count is used for validation.  Defaults to
+        :func:`default_schema`.
+
+    Returns
+    -------
+    norm : NDArray[np.floating], shape (n_dof,)
+        Normalization vector suitable for passing to
+        :meth:`StateSchema.with_svd`.
+    """
+    if schema is None:
+        schema = default_schema()
+
+    ts_ofc = os.environ.get("TS_OFC_DIR")
+    if ts_ofc:
+        candidate = Path(ts_ofc) / "policy" / "normalization_weights"
+        if candidate.is_dir():
+            weights_dir = candidate
+        else:
+            weights_dir = None
+    else:
+        weights_dir = None
+
+    def _load(name: str) -> NDArray[np.floating]:
+        if weights_dir is not None:
+            text = (weights_dir / name).read_text()
+        else:
+            text = files("StarSharp").joinpath(f"data/normalization_weights/{name}").read_text()
+        arr = np.asarray(yaml.safe_load(text), dtype=float)
+        if arr.ndim != 1 or len(arr) != schema.n_dof:
+            raise ValueError(f"{name}: expected {schema.n_dof} values, got {arr.shape}")
+        return arr
+
+    fwhm = _load("fwhm.yaml")
+    rng = _load("range.yaml")
+    return fwhm ** fwhm_exponent * rng ** range_exponent
+
+
 def default_raytraced_model(
     *,
     band: LSSTBand = "r",
@@ -213,6 +278,7 @@ __all__ = [
     "_OPTICS_VERSIONS",
     "default_schema",
     "default_camera",
+    "default_normalizations",
     "default_pointing_model",
     "default_raytraced_model",
 ]
