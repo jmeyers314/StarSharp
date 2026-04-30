@@ -628,3 +628,111 @@ class TestMomentsSpin:
         s00 = m2.spin_cos(0)
         assert s00.value.shape == (4,)
         np.testing.assert_allclose(s00.value, (m2.xx + m2.yy).value, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# ASDF round-trip tests
+# ---------------------------------------------------------------------------
+
+from .utils import RTP as _RTP, _make_field, roundtrip_asdf, roundtrip_asdf_ctx  # noqa: E402
+from .conftest import requires_starsharp_asdf  # noqa: E402
+
+
+def _make_moments2(rtp=None, field=None):
+    return Moments2(
+        xx=1.0 * u.mm**2,
+        xy=0.5 * u.mm**2,
+        yy=2.0 * u.mm**2,
+        frame="ocs",
+        field=field,
+        rtp=rtp,
+    )
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestMomentsAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def testroundtrip_asdf_ctx2(self):
+        m = _make_moments2()
+        rt = roundtrip_asdf_ctx(m)
+        assert isinstance(rt, Moments2)
+        assert rt.order == 2
+        np.testing.assert_allclose(rt.values.to_value(u.mm**2), m.values.to_value(u.mm**2))
+
+    def testroundtrip_asdf_ctx3(self):
+        m = Moments3(
+            xxx=1.0 * u.um**3, xxy=2.0 * u.um**3,
+            xyy=3.0 * u.um**3, yyy=4.0 * u.um**3,
+        )
+        rt = roundtrip_asdf_ctx(m)
+        assert isinstance(rt, Moments3)
+        assert rt.order == 3
+        np.testing.assert_allclose(rt.values.to_value(u.um**3), m.values.to_value(u.um**3))
+
+    def testroundtrip_asdf_ctx4(self):
+        m = Moments4(
+            xxxx=1.0 * u.um**4, xxxy=0.0 * u.um**4, xxyy=0.5 * u.um**4,
+            xyyy=0.0 * u.um**4, yyyy=1.0 * u.um**4,
+        )
+        rt = roundtrip_asdf_ctx(m)
+        assert isinstance(rt, Moments4)
+        assert rt.order == 4
+        np.testing.assert_allclose(rt.values.to_value(u.um**4), m.values.to_value(u.um**4))
+
+    def test_roundtrip_base_moments(self):
+        vals = np.array([1.0, 0.5, 2.0]) * u.mm**2
+        m = Moments(order=2, values=vals, frame="ocs")
+        rt = roundtrip_asdf_ctx(m)
+        assert rt.order == 2
+        np.testing.assert_allclose(rt.values.to_value(u.mm**2), vals.to_value(u.mm**2))
+
+    def test_roundtrip_frame(self):
+        m = _make_moments2(rtp=_RTP)
+        rt = roundtrip_asdf_ctx(m.ccs)
+        assert rt.frame == "ccs"
+
+    def test_roundtrip_with_rtp(self):
+        m = _make_moments2(rtp=_RTP)
+        rt = roundtrip_asdf_ctx(m)
+        assert isinstance(rt.rtp, Angle)
+        np.testing.assert_allclose(rt.rtp.rad, _RTP.rad)
+
+    def test_roundtrip_no_rtp_no_field(self):
+        m = _make_moments2()
+        rt = roundtrip_asdf_ctx(m)
+        assert rt.rtp is None
+        assert rt.field is None
+
+    def test_roundtrip_with_field(self):
+        field = _make_field(3, rtp=_RTP)
+        m = _make_moments2(rtp=_RTP, field=field)
+        rt = roundtrip_asdf_ctx(m)
+        np.testing.assert_allclose(
+            rt.field.x.to_value(u.deg), field.x.to_value(u.deg)
+        )
+
+    def test_roundtrip_batched(self):
+        vals = np.arange(15, dtype=float).reshape(3, 5) * u.um**2
+        m = Moments(order=2, values=vals, frame="ocs")
+        rt = roundtrip_asdf_ctx(m)
+        np.testing.assert_allclose(rt.values.to_value(u.um**2), vals.to_value(u.um**2))
+
+    def test_roundtrip_preserves_components(self):
+        m = _make_moments2()
+        rt = roundtrip_asdf_ctx(m)
+        np.testing.assert_allclose(rt.xx.to_value(u.mm**2), m.xx.to_value(u.mm**2))
+        np.testing.assert_allclose(rt.xy.to_value(u.mm**2), m.xy.to_value(u.mm**2))
+        np.testing.assert_allclose(rt.yy.to_value(u.mm**2), m.yy.to_value(u.mm**2))
+
+
+@requires_starsharp_asdf
+class TestMomentsAsdfEntryPoint:
+    def test_roundtrip(self):
+        m = _make_moments2(rtp=_RTP)
+        rt = roundtrip_asdf(m)
+        assert isinstance(rt, Moments2)
+        np.testing.assert_allclose(rt.values.to_value(u.mm**2), m.values.to_value(u.mm**2))

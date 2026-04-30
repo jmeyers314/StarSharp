@@ -1,11 +1,7 @@
 .ipynb_checkpoints
 __pycache__
-data/
-png/
-asdf/
 *.png
 .DS_Store
-transverse_sensitivity*.asdf
-wf_sensitivity*.asdf
 *.egg-info
 old/
+fits_data/

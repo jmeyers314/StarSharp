@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from StarSharp.datatypes.state import State, StateFactory, StateSchema
+from .utils import roundtrip_asdf, roundtrip_asdf_ctx
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -428,7 +429,7 @@ class TestStateBasisConversions:
         s = State(value=fvals, basis="f", schema=schema)
         np.testing.assert_allclose(s.x.value, [5.0, 9.0])
 
-    def test_x_to_f_to_x_roundtrip(self):
+    def test_x_to_f_to_xroundtrip_asdf_ctx(self):
         use_dof = np.array([1, 3, 7])
         schema = _make_schema(10, use_dof=use_dof)
         xvals = np.array([10.0, 20.0, 30.0])
@@ -462,7 +463,7 @@ class TestStateBasisConversions:
         s = State(value=np.array([0.5, 1.5, -0.5]), basis="v", schema=schema)
         np.testing.assert_allclose(s.x.v.value, s.value, atol=1e-12)
 
-    def test_v_to_f_to_v_roundtrip(self):
+    def test_v_to_f_to_vroundtrip_asdf_ctx(self):
         """Converting v -> f -> v preserves v-basis coefficients."""
         use_dof = np.array([1, 3, 5, 7])
         Vh = _make_Vh(4, 3)
@@ -567,3 +568,157 @@ class TestStateArithmetic:
         s = State(value=np.ones(3), basis="x", schema=schema)
         result = s.__mul__([1, 2])
         assert result is NotImplemented
+
+
+# ---------------------------------------------------------------------------
+# ASDF round-trip tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestStateSchemaAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def testroundtrip_asdf_ctx_minimal(self):
+        schema = _make_schema(5)
+        rt = roundtrip_asdf_ctx(schema)
+        assert rt.dof_names == schema.dof_names
+        assert rt.dof_units == schema.dof_units
+        np.testing.assert_array_equal(rt.use_dof, schema.use_dof)
+        assert rt.Vh is None
+        assert rt.S is None
+        assert rt.U is None
+
+    def testroundtrip_asdf_ctx_with_use_dof(self):
+        schema = _make_schema(10, use_dof=[1, 3, 7])
+        rt = roundtrip_asdf_ctx(schema)
+        np.testing.assert_array_equal(rt.use_dof, [1, 3, 7])
+        assert rt.n_active == 3
+
+    def testroundtrip_asdf_ctx_with_step(self):
+        step = np.array([0.1, 0.2, 0.5, 1.0, 2.0])
+        schema = StateSchema(
+            dof_names=NAMES_5,
+            dof_units=UNITS_5,
+            step=step,
+        )
+        rt = roundtrip_asdf_ctx(schema)
+        np.testing.assert_allclose(rt.step, step)
+
+    def testroundtrip_asdf_ctx_with_svd(self):
+        n_active, n_keep, n_obs = 4, 3, 20
+        Vh = _make_Vh(n_active, n_keep)
+        S = np.array([5.0, 3.0, 1.0])
+        U = np.random.default_rng(0).standard_normal((n_obs, n_keep))
+        schema = _make_schema(10, use_dof=list(range(n_active)), Vh=Vh, S=S, U=U)
+        rt = roundtrip_asdf_ctx(schema)
+        np.testing.assert_allclose(rt.Vh, Vh)
+        np.testing.assert_allclose(rt.S, S)
+        np.testing.assert_allclose(rt.U, U)
+
+    def testroundtrip_asdf_ctx_mixed_units(self):
+        schema = StateSchema(
+            dof_names=("Cam_dz", "Cam_dx", "Cam_rx", "Cam_ry"),
+            dof_units=(u.um, u.um, u.deg, u.deg),
+        )
+        rt = roundtrip_asdf_ctx(schema)
+        assert rt.dof_units == (u.um, u.um, u.deg, u.deg)
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestStateAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def testroundtrip_asdf_ctx_f_basis(self):
+        schema = _make_schema(5)
+        s = State(value=np.array([1.0, 2.0, 3.0, 4.0, 5.0]), basis="f", schema=schema)
+        rt = roundtrip_asdf_ctx(s)
+        assert rt.basis == "f"
+        np.testing.assert_allclose(rt.value, s.value)
+        assert rt.schema.dof_names == schema.dof_names
+
+    def testroundtrip_asdf_ctx_x_basis(self):
+        schema = _make_schema(5, use_dof=[1, 3])
+        s = State(value=np.array([0.5, 1.5]), basis="x", schema=schema)
+        rt = roundtrip_asdf_ctx(s)
+        assert rt.basis == "x"
+        np.testing.assert_allclose(rt.value, s.value)
+        np.testing.assert_array_equal(rt.schema.use_dof, [1, 3])
+
+    def testroundtrip_asdf_ctx_v_basis(self):
+        n_active, n_keep = 4, 2
+        Vh = _make_Vh(n_active, n_keep)
+        schema = _make_schema(5, use_dof=list(range(n_active)), Vh=Vh)
+        sf = StateFactory(schema=schema)
+        s = sf.v(np.array([0.3, -0.7]))
+        rt = roundtrip_asdf_ctx(s)
+        assert rt.basis == "v"
+        np.testing.assert_allclose(rt.value, s.value)
+        np.testing.assert_allclose(rt.schema.Vh, Vh)
+
+    def testroundtrip_asdf_ctx_schema_nested(self):
+        """The schema embedded in the round-tripped State is fully reconstructed."""
+        schema = _make_schema(3)
+        s = State(value=np.ones(3), basis="x", schema=schema)
+        rt = roundtrip_asdf_ctx(s)
+        assert isinstance(rt.schema, StateSchema)
+        assert rt.schema.n_dof == 3
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestStateFactoryAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def testroundtrip_asdf_ctx(self):
+        n_active, n_keep = 4, 3
+        Vh = _make_Vh(n_active, n_keep)
+        schema = _make_schema(5, use_dof=list(range(n_active)), Vh=Vh)
+        sf = StateFactory(schema=schema)
+        rt = roundtrip_asdf_ctx(sf)
+        assert isinstance(rt, StateFactory)
+        assert rt.schema.dof_names == schema.dof_names
+        np.testing.assert_allclose(rt.schema.Vh, Vh)
+        assert rt.n_keep == n_keep
+
+
+# ---------------------------------------------------------------------------
+# Same round-trips via the installed entry-point (no config_context)
+# ---------------------------------------------------------------------------
+
+from .conftest import requires_starsharp_asdf  # noqa: E402
+
+
+@requires_starsharp_asdf
+class TestStateAsdfEntryPoint:
+    """Re-runs a representative subset using the auto-discovered extension."""
+
+    def testroundtrip_asdf_ctx_schema(self):
+        schema = _make_schema(5)
+        rt = roundtrip_asdf(schema)
+        assert rt.dof_names == schema.dof_names
+        assert rt.dof_units == schema.dof_units
+        np.testing.assert_array_equal(rt.use_dof, schema.use_dof)
+
+    def testroundtrip_asdf_ctx_state(self):
+        schema = _make_schema(5, use_dof=[1, 3])
+        s = State(value=np.array([0.5, 1.5]), basis="x", schema=schema)
+        rt = roundtrip_asdf(s)
+        assert rt.basis == "x"
+        np.testing.assert_allclose(rt.value, s.value)
+
+    def testroundtrip_asdf_ctx_factory(self):
+        schema = _make_schema(5)
+        sf = StateFactory(schema=schema)
+        rt = roundtrip_asdf(sf)
+        assert isinstance(rt, StateFactory)
+        assert rt.schema.dof_names == schema.dof_names
+

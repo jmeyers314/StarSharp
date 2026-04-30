@@ -569,3 +569,97 @@ class TestSpotsFrameCase:
     def test_invalid_frame_raises(self):
         with pytest.raises(ValueError, match="frame must be one of"):
             _make_spots(frame="notaframe", rtp=RTP)
+
+
+# ---------------------------------------------------------------------------
+# ASDF round-trip tests
+# ---------------------------------------------------------------------------
+
+from .utils import roundtrip_asdf, roundtrip_asdf_ctx  # noqa: E402
+from .conftest import requires_starsharp_asdf  # noqa: E402
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestSpotsAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def test_roundtrip_basic(self):
+        sp = _make_spots(n_field=3, n_ray=50, rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        assert rt.frame == sp.frame
+        assert rt.dx.shape == sp.dx.shape
+        np.testing.assert_allclose(rt.dx.to_value(u.um), sp.dx.to_value(u.um))
+        np.testing.assert_allclose(rt.dy.to_value(u.um), sp.dy.to_value(u.um))
+
+    def test_roundtrip_vignetted(self):
+        sp = _make_spots(n_field=3, n_ray=50, rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        np.testing.assert_array_equal(rt.vignetted, sp.vignetted)
+
+    def test_roundtrip_field_embedded(self):
+        sp = _make_spots(n_field=3, n_ray=50, rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        np.testing.assert_allclose(
+            rt.field.x.to_value(u.deg), sp.field.x.to_value(u.deg)
+        )
+        np.testing.assert_allclose(
+            rt.field.y.to_value(u.deg), sp.field.y.to_value(u.deg)
+        )
+
+    def test_roundtrip_no_rtp(self):
+        sp = _make_spots(n_field=2, n_ray=20, rtp=None)
+        rt = roundtrip_asdf_ctx(sp)
+        assert rt.rtp is None
+
+    def test_roundtrip_rtp(self):
+        sp = _make_spots(n_field=2, n_ray=20, rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        from astropy.coordinates import Angle
+        assert isinstance(rt.rtp, Angle)
+        np.testing.assert_allclose(rt.rtp.rad, RTP.rad)
+
+    def test_roundtrip_wavelength(self):
+        from dataclasses import replace
+        sp = _make_spots(n_field=2, n_ray=20, rtp=RTP)
+        sp2 = replace(sp, wavelength=622.0 * u.nm)
+        rt = roundtrip_asdf_ctx(sp2)
+        np.testing.assert_allclose(rt.wavelength.to_value(u.nm), 622.0)
+
+    def test_roundtrip_with_pupil_coords(self):
+        from dataclasses import replace
+        sp = _make_spots_single(n_ray=50, rtp=RTP)
+        rng = np.random.default_rng(0)
+        px = rng.uniform(-4.18, 4.18, 50) * u.m
+        py = rng.uniform(-4.18, 4.18, 50) * u.m
+        sp2 = replace(sp, px=px, py=py)
+        rt = roundtrip_asdf_ctx(sp2)
+        np.testing.assert_allclose(rt.px.to_value(u.m), px.to_value(u.m))
+        np.testing.assert_allclose(rt.py.to_value(u.m), py.to_value(u.m))
+
+    def test_roundtrip_ccs_frame(self):
+        sp = _make_spots(n_field=3, n_ray=50, frame="ccs", rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        assert rt.frame == "ccs"
+
+    def test_roundtrip_dvcs_frame(self):
+        sp = _make_spots(n_field=3, n_ray=50, frame="dvcs", rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        assert rt.frame == "dvcs"
+
+    def test_roundtrip_single_field(self):
+        sp = _make_spots_single(n_ray=100, rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        assert rt.dx.shape == sp.dx.shape
+        np.testing.assert_allclose(rt.dx.to_value(u.um), sp.dx.to_value(u.um))
+
+
+@requires_starsharp_asdf
+class TestSpotsAsdfEntryPoint:
+    def test_roundtrip(self):
+        sp = _make_spots(n_field=3, n_ray=50, rtp=RTP)
+        rt = roundtrip_asdf(sp)
+        assert rt.frame == sp.frame
+        np.testing.assert_allclose(rt.dx.to_value(u.um), sp.dx.to_value(u.um))

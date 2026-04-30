@@ -21,6 +21,13 @@ dev = [
     "pytest",
     "pytest-cov",
 ]
+asdf = [
+    "asdf>=2.14",
+    "asdf-astropy>=0.3",
+]
+
+[project.entry-points."asdf.extensions"]
+starsharp = "StarSharp.io.asdf.extension:StarSharpExtension"
 
 [tool.setuptools.packages.find]
 where = ["."]

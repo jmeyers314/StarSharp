@@ -311,3 +311,79 @@ class TestDoubleZernikesToGalsim:
         gz = dz.to_galsim()
         assert gz.uv_outer == pytest.approx(PUPIL_OUTER.to_value(u.m))
         assert gz.xy_outer == pytest.approx(FIELD_OUTER.to_value(u.deg))
+
+
+# ---------------------------------------------------------------------------
+# ASDF round-trip tests
+# ---------------------------------------------------------------------------
+
+from .utils import roundtrip_asdf, roundtrip_asdf_ctx  # noqa: E402
+from .conftest import requires_starsharp_asdf  # noqa: E402
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestDoubleZernikesAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def test_roundtrip_basic(self):
+        dz = _make_dz(kmax=8, jmax=22, rtp=RTP)
+        rt = roundtrip_asdf_ctx(dz)
+        assert rt.kmax == dz.kmax
+        assert rt.jmax == dz.jmax
+        assert rt.frame == dz.frame
+        np.testing.assert_allclose(rt.coefs.to_value(u.um), dz.coefs.to_value(u.um))
+
+    def test_roundtrip_radii(self):
+        dz = _make_dz(kmax=4, jmax=10, rtp=RTP)
+        rt = roundtrip_asdf_ctx(dz)
+        np.testing.assert_allclose(rt.field_outer.to_value(u.deg), FIELD_OUTER.to_value(u.deg))
+        np.testing.assert_allclose(rt.field_inner.to_value(u.deg), FIELD_INNER.to_value(u.deg))
+        np.testing.assert_allclose(rt.pupil_outer.to_value(u.m), PUPIL_OUTER.to_value(u.m))
+        np.testing.assert_allclose(rt.pupil_inner.to_value(u.m), PUPIL_INNER.to_value(u.m))
+
+    def test_roundtrip_batched(self):
+        dz = _make_dz(kmax=4, jmax=10, batch_shape=(3,), rtp=RTP)
+        rt = roundtrip_asdf_ctx(dz)
+        assert rt.coefs.shape == dz.coefs.shape
+        np.testing.assert_allclose(rt.coefs.to_value(u.um), dz.coefs.to_value(u.um))
+
+    def test_roundtrip_no_rtp(self):
+        dz = _make_dz(kmax=4, jmax=10)
+        rt = roundtrip_asdf_ctx(dz)
+        assert rt.rtp is None
+
+    def test_roundtrip_rtp(self):
+        dz = _make_dz(kmax=4, jmax=10, rtp=RTP)
+        rt = roundtrip_asdf_ctx(dz)
+        assert isinstance(rt.rtp, Angle)
+        np.testing.assert_allclose(rt.rtp.rad, RTP.rad)
+
+    def test_roundtrip_with_wavelength(self):
+        from dataclasses import replace
+        dz = _make_dz(kmax=4, jmax=10, rtp=RTP)
+        dz2 = replace(dz, wavelength=622.0 * u.nm)
+        rt = roundtrip_asdf_ctx(dz2)
+        np.testing.assert_allclose(rt.wavelength.to_value(u.nm), 622.0)
+
+    def test_roundtrip_eps(self):
+        dz = _make_dz(kmax=4, jmax=10, rtp=RTP)
+        rt = roundtrip_asdf_ctx(dz)
+        assert rt.eps == pytest.approx(dz.eps)
+
+    def test_roundtrip_frame_ccs(self):
+        dz = _make_dz(kmax=4, jmax=10, frame="ccs", rtp=RTP)
+        rt = roundtrip_asdf_ctx(dz)
+        assert rt.frame == "ccs"
+
+
+@requires_starsharp_asdf
+class TestDoubleZernikesAsdfEntryPoint:
+    def test_roundtrip(self):
+        dz = _make_dz(kmax=4, jmax=10, rtp=RTP)
+        rt = roundtrip_asdf(dz)
+        assert rt.kmax == dz.kmax
+        assert rt.jmax == dz.jmax
+        np.testing.assert_allclose(rt.coefs.to_value(u.um), dz.coefs.to_value(u.um))

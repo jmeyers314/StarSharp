@@ -9,7 +9,7 @@ from astropy.coordinates import Angle
 
 from StarSharp.datatypes import FieldCoords
 
-from .utils import RTP, _make_field
+from .utils import RTP, _make_field, roundtrip_asdf, roundtrip_asdf_ctx
 
 class TestFieldCoordsConstruction:
     def test_scalar_promoted_to_1d(self):
@@ -361,3 +361,96 @@ class TestFieldCoordsMultiStepRoundtrip:
         np.testing.assert_allclose(
             rt.y.to_value(u.deg), fc.y.to_value(u.deg), atol=1e-10
         )
+
+
+# ---------------------------------------------------------------------------
+# ASDF round-trip tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestFieldCoordsAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def test_roundtrip_angle_no_rtp(self):
+        fc = FieldCoords(x=1.5 * u.deg, y=-0.5 * u.deg)
+        rt = roundtrip_asdf_ctx(fc)
+        assert rt.frame == "ocs"
+        assert rt.rtp is None
+        np.testing.assert_allclose(rt.x.to_value(u.deg), fc.x.to_value(u.deg))
+        np.testing.assert_allclose(rt.y.to_value(u.deg), fc.y.to_value(u.deg))
+
+    def test_roundtrip_with_rtp(self):
+        rtp = Angle(0.3, unit=u.rad)
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="ocs", rtp=rtp)
+        rt = roundtrip_asdf_ctx(fc)
+        assert rt.frame == "ocs"
+        assert isinstance(rt.rtp, Angle)
+        np.testing.assert_allclose(rt.rtp.rad, rtp.rad)
+
+    def test_roundtrip_focal_plane(self):
+        fc = FieldCoords(x=10.0 * u.mm, y=-5.0 * u.mm)
+        rt = roundtrip_asdf_ctx(fc)
+        assert rt.space == "focal_plane"
+        np.testing.assert_allclose(rt.x.to_value(u.mm), fc.x.to_value(u.mm))
+        np.testing.assert_allclose(rt.y.to_value(u.mm), fc.y.to_value(u.mm))
+
+    def test_roundtrip_batched(self):
+        x = np.linspace(-1.0, 1.0, 5) * u.deg
+        y = np.zeros(5) * u.deg
+        fc = FieldCoords(x=x, y=y)
+        rt = roundtrip_asdf_ctx(fc)
+        assert rt.x.shape == (5,)
+        np.testing.assert_allclose(rt.x.to_value(u.deg), fc.x.to_value(u.deg))
+        np.testing.assert_allclose(rt.y.to_value(u.deg), fc.y.to_value(u.deg))
+
+    def test_roundtrip_frame_ccs(self):
+        rtp = Angle(0.5, unit=u.rad)
+        fc = FieldCoords(x=0.5 * u.deg, y=0.5 * u.deg, frame="ccs", rtp=rtp)
+        rt = roundtrip_asdf_ctx(fc)
+        assert rt.frame == "ccs"
+
+    def test_roundtrip_preserves_units(self):
+        fc = FieldCoords(x=1800.0 * u.arcsec, y=900.0 * u.arcsec)
+        rt = roundtrip_asdf_ctx(fc)
+        np.testing.assert_allclose(
+            rt.x.to_value(u.arcsec), fc.x.to_value(u.arcsec)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Same round-trips via the installed entry-point (no config_context)
+# ---------------------------------------------------------------------------
+
+from .conftest import requires_starsharp_asdf  # noqa: E402
+
+
+@requires_starsharp_asdf
+class TestFieldCoordsAsdfEntryPoint:
+    """Re-runs a representative subset using the auto-discovered extension."""
+
+    def test_roundtrip_angle_no_rtp(self):
+        fc = FieldCoords(x=1.5 * u.deg, y=-0.5 * u.deg)
+        rt = roundtrip_asdf(fc)
+        assert rt.frame == "ocs"
+        assert rt.rtp is None
+        np.testing.assert_allclose(rt.x.to_value(u.deg), fc.x.to_value(u.deg))
+        np.testing.assert_allclose(rt.y.to_value(u.deg), fc.y.to_value(u.deg))
+
+    def test_roundtrip_with_rtp(self):
+        rtp = Angle(0.3, unit=u.rad)
+        fc = FieldCoords(x=1.0 * u.deg, y=2.0 * u.deg, frame="ocs", rtp=rtp)
+        rt = roundtrip_asdf(fc)
+        assert isinstance(rt.rtp, Angle)
+        np.testing.assert_allclose(rt.rtp.rad, rtp.rad)
+
+    def test_roundtrip_focal_plane(self):
+        fc = FieldCoords(x=10.0 * u.mm, y=-5.0 * u.mm)
+        rt = roundtrip_asdf(fc)
+        assert rt.space == "focal_plane"
+        np.testing.assert_allclose(rt.x.to_value(u.mm), fc.x.to_value(u.mm))
+        np.testing.assert_allclose(rt.y.to_value(u.mm), fc.y.to_value(u.mm))
+

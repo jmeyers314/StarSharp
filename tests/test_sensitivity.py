@@ -490,3 +490,120 @@ class TestStateSchemaWithSvd:
         schema2 = _SCHEMA.with_svd(sens)
         assert schema2.Vh.shape[1] == N_ACTIVE
         assert schema2.S.shape[0] == N_ACTIVE
+
+
+# ---------------------------------------------------------------------------
+# ASDF round-trip tests
+# ---------------------------------------------------------------------------
+
+from .utils import roundtrip_asdf, roundtrip_asdf_ctx  # noqa: E402
+from .conftest import requires_starsharp_asdf  # noqa: E402
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestSensitivityAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def testroundtrip_asdf_ctx_zernikes_basis_x(self):
+        sens, nominal, steps = _make_zk_sensitivity()
+        sens_x = sens.x
+        rt = roundtrip_asdf_ctx(sens_x)
+        assert rt.basis == "x"
+        assert isinstance(rt.gradient, Zernikes)
+        assert rt.gradient.coefs.shape == sens_x.gradient.coefs.shape
+        np.testing.assert_allclose(
+            rt.gradient.coefs.to_value(u.um),
+            sens_x.gradient.coefs.to_value(u.um),
+        )
+
+    def testroundtrip_asdf_ctx_zernikes_basis_f(self):
+        nominal = _make_zk_nominal()
+        steps_f = State(
+            value=np.ones(N_DOF),
+            basis="f",
+            schema=_SCHEMA,
+        )
+        perturbed = [_make_zk_perturbed(nominal, 1.0, seed=10 + i) for i in range(N_DOF)]
+        sens_f = Sensitivity.from_finite_differences(nominal, perturbed, steps_f)
+        rt = roundtrip_asdf_ctx(sens_f)
+        assert rt.basis == "f"
+        assert len(rt.gradient) == N_DOF
+
+    def testroundtrip_asdf_ctx_schema_preserved(self):
+        sens, _, _ = _make_zk_sensitivity()
+        rt = roundtrip_asdf_ctx(sens)
+        assert rt.schema.dof_names == _SCHEMA.dof_names
+        np.testing.assert_array_equal(rt.schema.use_dof, _SCHEMA.use_dof)
+
+    def testroundtrip_asdf_ctx_nominal_preserved(self):
+        sens, nominal, _ = _make_zk_sensitivity()
+        rt = roundtrip_asdf_ctx(sens)
+        assert isinstance(rt.nominal, Zernikes)
+        np.testing.assert_allclose(
+            rt.nominal.coefs.to_value(u.um),
+            nominal.coefs.to_value(u.um),
+        )
+
+    def testroundtrip_asdf_ctx_spots(self):
+        sens = _make_spots_sensitivity()
+        rt = roundtrip_asdf_ctx(sens)
+        assert rt.basis == sens.basis
+        assert isinstance(rt.gradient, Spots)
+        assert rt.gradient.dx.shape == sens.gradient.dx.shape
+        np.testing.assert_allclose(
+            rt.gradient.dx.to_value(u.um),
+            sens.gradient.dx.to_value(u.um),
+        )
+
+    def testroundtrip_asdf_ctx_spots_nominal(self):
+        sens = _make_spots_sensitivity()
+        rt = roundtrip_asdf_ctx(sens)
+        assert isinstance(rt.nominal, Spots)
+        np.testing.assert_allclose(
+            rt.nominal.dx.to_value(u.um),
+            sens.nominal.dx.to_value(u.um),
+        )
+
+    def testroundtrip_asdf_ctx_with_svd_basis_v(self):
+        sens, _, _ = _make_zk_sensitivity()
+        schema_svd = _SCHEMA.with_svd(sens)
+        sens_v = Sensitivity(
+            gradient=sens.x.gradient,
+            schema=schema_svd,
+            nominal=sens.nominal,
+            basis="x",
+        ).v
+        rt = roundtrip_asdf_ctx(sens_v)
+        assert rt.basis == "v"
+        assert rt.schema.Vh is not None
+        np.testing.assert_allclose(rt.schema.Vh, schema_svd.Vh)
+
+    def testroundtrip_asdf_ctx_predict_consistent(self):
+        """Predict with round-tripped sensitivity matches original."""
+        sens, _, steps = _make_zk_sensitivity()
+        rt = roundtrip_asdf_ctx(sens.x)
+        state = State(value=np.array([0.1, 0.2, 0.3, 0.4]), basis="x", schema=_SCHEMA)
+        pred_orig = sens.x.predict(state)
+        pred_rt = rt.predict(state)
+        np.testing.assert_allclose(
+            pred_rt.coefs.to_value(u.um),
+            pred_orig.coefs.to_value(u.um),
+            atol=1e-12,
+        )
+
+
+@requires_starsharp_asdf
+class TestSensitivityAsdfEntryPoint:
+    def testroundtrip_asdf_ctx_zernikes(self):
+        sens, _, _ = _make_zk_sensitivity()
+        rt = roundtrip_asdf(sens.x)
+        assert rt.basis == "x"
+        assert isinstance(rt.gradient, Zernikes)
+
+    def testroundtrip_asdf_ctx_spots(self):
+        sens = _make_spots_sensitivity()
+        rt = roundtrip_asdf(sens)
+        assert isinstance(rt.gradient, Spots)

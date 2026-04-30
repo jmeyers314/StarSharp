@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from functools import cache
 
 import astropy.units as u
@@ -63,6 +64,54 @@ def _make_spots_single(n_ray: int = 200, rtp: Angle = RTP) -> Spots:
     vig = np.zeros(n_ray, dtype=bool)
     field = FieldCoords(x=0.5 * u.deg, y=-0.3 * u.deg, frame="ocs", rtp=rtp)
     return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame="ccs", rtp=rtp)
+
+
+# ---------------------------------------------------------------------------
+# ASDF helpers
+# ---------------------------------------------------------------------------
+
+def _starsharp_asdf_registered() -> bool:
+    """Return True if StarSharp is registered as an asdf entry-point extension."""
+    try:
+        from importlib.metadata import entry_points
+        eps = entry_points(group="asdf.extensions")
+        return any(ep.name == "starsharp" for ep in eps)
+    except Exception:
+        return False
+
+
+def roundtrip_asdf(obj):
+    """Round-trip *obj* through ASDF using the installed entry-point extension.
+
+    Requires StarSharp to be installed with ``pip install -e .[asdf]``.
+    Use the ``requires_starsharp_asdf`` mark to skip when it isn't.
+    """
+    import asdf
+
+    buf = io.BytesIO()
+    with asdf.AsdfFile({"obj": obj}) as af:
+        af.write_to(buf)
+    buf.seek(0)
+    with asdf.open(buf) as af2:
+        return af2["obj"]
+
+
+def roundtrip_asdf_ctx(obj):
+    """Round-trip *obj* through ASDF using config_context to register the extension.
+
+    Works without a package install; always available when asdf is importable.
+    """
+    import asdf
+    from StarSharp.io.asdf.extension import StarSharpExtension
+
+    buf = io.BytesIO()
+    with asdf.config_context() as cfg:
+        cfg.add_extension(StarSharpExtension())
+        with asdf.AsdfFile({"obj": obj}) as af:
+            af.write_to(buf)
+        buf.seek(0)
+        with asdf.open(buf) as af2:
+            return af2["obj"]
 
 
 def _make_spots_batched(n_field: int = 4, n_ray: int = 200, rtp: Angle = RTP) -> Spots:

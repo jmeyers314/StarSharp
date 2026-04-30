@@ -161,3 +161,78 @@ class TestZernikesToGalsim:
         gz_nm = zk.to_galsim(unit=u.nm)
         gz_um = zk.to_galsim(unit=u.um)
         np.testing.assert_allclose(gz_nm.coef, gz_um.coef * 1000, atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# ASDF round-trip tests
+# ---------------------------------------------------------------------------
+
+from .utils import roundtrip_asdf, roundtrip_asdf_ctx  # noqa: E402
+from .conftest import requires_starsharp_asdf  # noqa: E402
+
+
+@pytest.mark.skipif(
+    pytest.importorskip("asdf", reason="asdf not installed") is None,
+    reason="asdf not installed",
+)
+class TestZernikesAsdf:
+    asdf = pytest.importorskip("asdf")
+
+    def test_roundtrip_basic(self):
+        zk = _make_zernikes(n_field=1, jmax=10, rtp=RTP)
+        rt = roundtrip_asdf_ctx(zk)
+        assert rt.jmax == zk.jmax
+        assert rt.frame == zk.frame
+        np.testing.assert_allclose(rt.coefs.to_value(u.um), zk.coefs.to_value(u.um))
+
+    def test_roundtrip_multi_field(self):
+        zk = _make_zernikes(n_field=5, jmax=22, rtp=RTP)
+        rt = roundtrip_asdf_ctx(zk)
+        assert rt.coefs.shape == zk.coefs.shape
+        np.testing.assert_allclose(rt.coefs.to_value(u.um), zk.coefs.to_value(u.um))
+
+    def test_roundtrip_preserves_radii(self):
+        zk = _make_zernikes(R_outer=4.18 << u.m, R_inner=2.5 << u.m, rtp=RTP)
+        rt = roundtrip_asdf_ctx(zk)
+        np.testing.assert_allclose(rt.R_outer.to_value(u.m), 4.18)
+        np.testing.assert_allclose(rt.R_inner.to_value(u.m), 2.5)
+
+    def test_roundtrip_with_wavelength(self):
+        zk = _make_zernikes(jmax=10, rtp=RTP)
+        zk2 = Zernikes(
+            coefs=zk.coefs, field=zk.field,
+            R_outer=zk.R_outer, R_inner=zk.R_inner,
+            wavelength=622.0 * u.nm, frame=zk.frame, rtp=RTP,
+        )
+        rt = roundtrip_asdf_ctx(zk2)
+        np.testing.assert_allclose(rt.wavelength.to_value(u.nm), 622.0)
+
+    def test_roundtrip_no_rtp(self):
+        zk = _make_zernikes(jmax=10)
+        rt = roundtrip_asdf_ctx(zk)
+        assert rt.rtp is None
+
+    def test_roundtrip_rtp(self):
+        zk = _make_zernikes(jmax=10, rtp=RTP)
+        rt = roundtrip_asdf_ctx(zk)
+        assert isinstance(rt.rtp, Angle)
+        np.testing.assert_allclose(rt.rtp.rad, RTP.rad)
+
+    def test_roundtrip_field_embedded(self):
+        zk = _make_zernikes(n_field=3, jmax=10, rtp=RTP)
+        rt = roundtrip_asdf_ctx(zk)
+        np.testing.assert_allclose(
+            rt.field.x.to_value(u.deg), zk.field.x.to_value(u.deg)
+        )
+        np.testing.assert_allclose(
+            rt.field.y.to_value(u.deg), zk.field.y.to_value(u.deg)
+        )
+
+
+@requires_starsharp_asdf
+class TestZernikesAsdfEntryPoint:
+    def test_roundtrip(self):
+        zk = _make_zernikes(n_field=3, jmax=10, rtp=RTP)
+        rt = roundtrip_asdf(zk)
+        assert rt.jmax == zk.jmax
+        np.testing.assert_allclose(rt.coefs.to_value(u.um), zk.coefs.to_value(u.um))

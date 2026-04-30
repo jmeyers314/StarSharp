@@ -1,0 +1,24 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - {name: rtp, unit: deg, datatype: float64}
+# - {name: Cam_dz, unit: um, datatype: float64}
+# meta: !!omap
+# - __serialized_columns__:
+#     Cam_dz:
+#       __class__: astropy.units.quantity.Quantity
+#       unit: !astropy.units.Unit {unit: um}
+#       value: !astropy.table.SerializedColumn {name: Cam_dz}
+#     rtp:
+#       __class__: astropy.units.quantity.Quantity
+#       unit: !astropy.units.Unit {unit: deg}
+#       value: !astropy.table.SerializedColumn {name: rtp}
+# schema: astropy-2.0
+rtp Cam_dz
+-90.0 -0.4284538164709793
+-60.0 -0.4284538164709793
+-30.0 -0.4284538164709793
+0.0 -0.4284538164709793
+30.0 -0.4284538164709793
+60.0 -0.4284538164709793
+90.0 -0.4284538164709793
