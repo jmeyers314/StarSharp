@@ -4,6 +4,36 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+def str_to_arr(s: "str | list[int] | NDArray") -> NDArray:
+    """Parse an int specification into an integer array.
+
+    Accepts:
+    - A list or numpy array — returned cast to ``int``.
+    - A comma-separated string of indices and/or **inclusive** ranges,
+      e.g. ``"0-9,20,30-36"`` → ``[0,1,...,9,20,30,31,...,36]``.
+
+    Parameters
+    ----------
+    s : str, list[int], or ndarray
+        int specification
+
+    Returns
+    -------
+    ndarray of int
+    """
+    if isinstance(s, (list, np.ndarray)):
+        return np.asarray(s, dtype=int)
+    result: list[int] = []
+    for part in str(s).split(","):
+        part = part.strip()
+        if "-" in part:
+            start, end = map(int, part.split("-"))
+            result.extend(range(start, end + 1))
+        else:
+            result.append(int(part))
+    return np.array(result, dtype=int)
+
+
 def gaussian_quadrature_2d(
     nrings: int = 2,
     nphi: int = 6,

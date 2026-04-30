@@ -22,6 +22,7 @@ from ..datatypes import (
     StateSchema,
     Zernikes,
 )
+from .rtp_lookup import RTPLookup
 
 PUPIL_OUTER = 4.18
 PUPIL_INNER = PUPIL_OUTER * 0.612
@@ -75,7 +76,7 @@ class RaytracedOpticalModel:
         state_schema: StateSchema,
         offset: State | None = None,
         pointing_model: PointingModel | None = None,
-        rtp_lookup=None,
+        rtp_lookup: RTPLookup | None = None,
     ):
         self.builder = builder
         self.rtp = rtp
@@ -87,6 +88,7 @@ class RaytracedOpticalModel:
             # Reindex/rescale once so runtime uses a single immutable schema-aligned PM.
             pointing_model = pointing_model.aligned(state_schema, strict=True)
         self.pointing_model = pointing_model
+        self.rtp_lookup = rtp_lookup
         if rtp_lookup is not None:
             lookup_state = rtp_lookup.state_at(rtp, state_schema)
             offset = lookup_state if offset is None else offset + lookup_state
@@ -445,8 +447,9 @@ class RaytracedOpticalModel:
         zk: Zernikes | DoubleZernikes | None = None,
         jmax: int = 28,
         rings: int = 10,
+        nx: int = 63,
         reference: Literal["chief", "mean", "ring"] = "ring",
-        algorithm: Literal["ta", "gq"] = "gq",
+        algorithm: Literal["ta", "gq", "zk"] = "gq",
         include_chip_heights: bool = True,
         camera_piston: Quantity = None,
         detector_piston: Quantity = None,
@@ -473,11 +476,14 @@ class RaytracedOpticalModel:
         rings : int
             Number of radial rings for computing zernikes.
             (default: 10).
+        nx : int
+            Grid size for computing zernikes with the "zk" algorithm.
+            (default: 63, which is sufficient for jmax=28).
         reference : Literal["chief", "mean", "ring"]
             Whether to compute Zernikes relative to the chief ray intersection,
             the mean intersection of all unvignetted rays, or the mean of a
             ring of (possibly vignetted) rays.
-        algorithm : Literal["ta", "gq"]
+        algorithm : Literal["ta", "gq", "zk"]
             Algorithm to use for computing zernikes.  "ta" uses the
             transverse aberration approach, "gq" uses Gaussian quadrature.
         include_chip_heights : bool
@@ -541,6 +547,23 @@ class RaytracedOpticalModel:
                     )
                 except ValueError:
                     zk1 = np.full(jmax + 1, np.nan)
+            elif algorithm == "zk":
+                try:
+                    zk1 = batoid.zernike(
+                        telescope,
+                        theta_x=thx.to_value(u.rad),
+                        theta_y=thy.to_value(u.rad),
+                        wavelength=self.wavelength.to_value(u.m),
+                        nx=nx,
+                        jmax=jmax,
+                        eps=PUPIL_INNER / PUPIL_OUTER,
+                        reference=reference,
+                        projection="gnomonic",
+                    )
+                except ValueError:
+                    zk1 = np.full(jmax + 1, np.nan)
+            else:
+                raise ValueError(f"Invalid algorithm {algorithm!r}")
             zk_out.append(zk1)
 
         coefs = np.array(zk_out, dtype=float).reshape(batch_shape + (nfield, jmax + 1))
@@ -691,7 +714,7 @@ class RaytracedOpticalModel:
         jmax: int = 28,
         rings: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
-        algorithm: Literal["ta", "gq"] = "gq",
+        algorithm: Literal["ta", "gq", "zk"] = "gq",
         include_chip_heights: bool = True,
         tqdm: type[TqdmType] | None = None,
     ) -> Sensitivity:
@@ -721,7 +744,7 @@ class RaytracedOpticalModel:
             Whether to compute Zernikes relative to the chief ray intersection,
             the mean intersection of all unvignetted rays, or the mean of a
             ring of (possibly vignetted) rays.
-        algorithm : Literal["ta", "gq"]
+        algorithm : Literal["ta", "gq", "zk"]
             Algorithm to use for computing zernikes.  "ta" uses the
             transverse aberration approach, "gq" uses Gaussian quadrature.
         include_chip_heights : bool
