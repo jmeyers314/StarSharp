@@ -157,8 +157,21 @@ class TestSpots:
         assert spots.dx.unit == u.micron
         assert spots.dy.unit == u.micron
 
-    def test_field_units_mm(self, spots):
-        assert spots.field.x.unit == u.mm
+    def test_field_preserves_input(self, spots, small_field):
+        assert spots.field.x.unit == small_field.x.unit
+        np.testing.assert_allclose(
+            spots.field.x.to_value(u.deg),
+            small_field.x.to_value(u.deg),
+        )
+        np.testing.assert_allclose(
+            spots.field.y.to_value(u.deg),
+            small_field.y.to_value(u.deg),
+        )
+
+    def test_centroid_field_units_mm(self, spots):
+        cf = spots.centroid_field()
+        assert cf.x.unit == u.mm
+        assert cf.y.unit == u.mm
 
     def test_no_all_vignetted(self, spots):
         # On-sky science field: at least some rays should get through

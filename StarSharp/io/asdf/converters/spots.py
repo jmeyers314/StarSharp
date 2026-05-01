@@ -16,6 +16,8 @@ class SpotsConverter(Converter):
             "dy": obj.dy,
             "vignetted": obj.vignetted,
             "field": obj.field,
+            "x0": obj.x0,
+            "y0": obj.y0,
             "frame": obj.frame,
         }
         if obj.wavelength is not None:
@@ -42,4 +44,6 @@ class SpotsConverter(Converter):
             rtp=rtp,
             px=node.get("px"),
             py=node.get("py"),
+            x0=node["x0"],
+            y0=node["y0"],
         )

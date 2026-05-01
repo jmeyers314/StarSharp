@@ -339,6 +339,8 @@ class RaytracedOpticalModel:
         -------
         Spots
             Spot diagrams in the CCS frame with focal-plane units (micron).
+            ``field`` preserves the input/provenance field coordinates, while
+            ``x0``/``y0`` store traced focal-plane centroids.
             Shape ``(*batch_shape, nfield, nray)``.
         """
         # Pick an outer radius that is half a grid step smaller than the outer pupil
@@ -435,7 +437,9 @@ class RaytracedOpticalModel:
             dx.reshape(batch_shape + (nfield, nray)) * 1e6 << u.micron,
             dy.reshape(batch_shape + (nfield, nray)) * 1e6 << u.micron,
             vignetted.reshape(batch_shape + (nfield, nray)),
-            field=out_field,
+            field=field,
+            x0=out_field.x,
+            y0=out_field.y,
             wavelength=self.wavelength,
             frame="ccs",
             rtp=self.rtp,

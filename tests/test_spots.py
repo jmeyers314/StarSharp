@@ -20,6 +20,29 @@ from .utils import (
 )
 
 
+def _assert_spots_roundtrip(rt: Spots, sp: Spots, unit: u.Unit, atol: float) -> None:
+    np.testing.assert_allclose(
+        rt.dx.to_value(unit),
+        sp.dx.to_value(unit),
+        atol=atol,
+    )
+    np.testing.assert_allclose(
+        rt.dy.to_value(unit),
+        sp.dy.to_value(unit),
+        atol=atol,
+    )
+    np.testing.assert_allclose(
+        rt.x0.to_value(unit),
+        sp.x0.to_value(unit),
+        atol=atol,
+    )
+    np.testing.assert_allclose(
+        rt.y0.to_value(unit),
+        sp.y0.to_value(unit),
+        atol=atol,
+    )
+
+
 class TestSpotsConstruction:
     def test_scalar_promoted(self):
         fc = FieldCoords(x=1.0 * u.deg, y=0.5 * u.deg)
@@ -28,6 +51,8 @@ class TestSpotsConstruction:
             dy=0.2 * u.um,
             vignetted=np.array(False),
             field=fc,
+            x0=0.0 * u.um,
+            y0=0.0 * u.um,
         )
         assert sp.dx.ndim == 2
         assert sp.dy.ndim == 2
@@ -45,10 +70,27 @@ class TestSpotsConstruction:
             dy=np.ones(10) * u.um,
             vignetted=np.zeros(10, dtype=bool),
             field=fc,
+            x0=0.0 * u.um,
+            y0=0.0 * u.um,
         )
         assert sp.dx.ndim == 2
         assert sp.dx.shape == (1, 10)
         assert len(sp) == 1
+
+
+class TestSpotsCentroidField:
+    def test_centroid_field_uses_centroid_coordinates_when_present(self):
+        sp = _make_spots(n_field=3, rtp=RTP)
+        cf = sp.centroid_field()
+        assert cf.frame == sp.frame
+        np.testing.assert_allclose(
+            cf.x.to_value(u.mm),
+            sp.x0.to_value(u.mm),
+        )
+        np.testing.assert_allclose(
+            cf.y.to_value(u.mm),
+            sp.y0.to_value(u.mm),
+        )
 
 
 class TestSpotsRtpConsistency:
@@ -64,6 +106,8 @@ class TestSpotsRtpConsistency:
                 dy=np.ones((3, 10)) * u.um,
                 vignetted=np.zeros((3, 10), dtype=bool),
                 field=field,
+                x0=np.zeros(3) * u.um,
+                y0=np.zeros(3) * u.um,
                 rtp=Angle(999.0, unit=u.deg),
             )
 
@@ -80,20 +124,13 @@ class TestSpotsFrameRotation:
     def test_roundtrip_ccs_ocs(self):
         sp = _make_spots(frame="ccs", rtp=RTP)
         rt = sp.ocs.ccs
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.um), sp.dx.to_value(u.um), atol=1e-10
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.um), sp.dy.to_value(u.um), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.um, atol=1e-10)
         assert rt.frame == "ccs"
 
     def test_roundtrip_ocs_ccs(self):
         sp = _make_spots(frame="ocs", rtp=RTP)
         rt = sp.ccs.ocs
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.um), sp.dx.to_value(u.um), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.um, atol=1e-10)
 
     def test_without_rtp_raises(self):
         sp = _make_spots(frame="ccs", rtp=None)
@@ -122,22 +159,12 @@ class TestSpotsSpace:
     def test_roundtrip_focal_plane_angle(self):
         sp = _make_spots(frame="ccs", rtp=RTP, unit=u.mm)
         rt = sp.angle.focal_plane
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.mm), sp.dx.to_value(u.mm), atol=1e-12
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.mm), sp.dy.to_value(u.mm), atol=1e-12
-        )
+        _assert_spots_roundtrip(rt, sp, u.mm, atol=1e-12)
 
     def test_roundtrip_angle_focal_plane(self):
         sp = _make_spots(frame="ocs", rtp=RTP, unit=u.arcsec)
         rt = sp.focal_plane.angle
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-12
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-12
-        )
+        _assert_spots_roundtrip(rt, sp, u.arcsec, atol=1e-12)
 
 
 class TestSpotsMultiStepRoundtrip:
@@ -149,12 +176,7 @@ class TestSpotsMultiStepRoundtrip:
         rt = sp.dvcs.focal_plane.ccs.angle
         assert rt.frame == "ccs"
         assert rt.space == "angle"
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.arcsec, atol=1e-10)
 
     def test_ocs_angle_to_ccs_fp_to_dvcs_angle_to_ocs(self):
         # OCS angle -> CCS fp -> DVCS angle -> OCS angle
@@ -162,12 +184,7 @@ class TestSpotsMultiStepRoundtrip:
         rt = sp.ccs.focal_plane.dvcs.angle.ocs
         assert rt.frame == "ocs"
         assert rt.space == "angle"
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.arcsec, atol=1e-10)
 
     def test_ccs_fp_to_ocs_angle_to_edcs_fp(self):
         # CCS fp -> OCS angle -> EDCS fp -> CCS fp
@@ -175,12 +192,7 @@ class TestSpotsMultiStepRoundtrip:
         rt = sp.angle.ocs.edcs.focal_plane.ccs
         assert rt.frame == "ccs"
         assert rt.space == "focal_plane"
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.mm), sp.dx.to_value(u.mm), atol=1e-10
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.mm), sp.dy.to_value(u.mm), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.mm, atol=1e-10)
 
     def test_dvcs_angle_through_all_frames_and_spaces(self):
         # DVCS angle -> CCS fp -> OCS angle -> DVCS angle
@@ -188,12 +200,7 @@ class TestSpotsMultiStepRoundtrip:
         rt = sp.ccs.focal_plane.ocs.angle.dvcs
         assert rt.frame == "dvcs"
         assert rt.space == "angle"
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.arcsec, atol=1e-10)
 
     def test_double_space_roundtrip_with_frame_hops(self):
         # OCS angle -> DVCS fp -> CCS angle -> OCS fp -> DVCS angle -> OCS angle
@@ -201,12 +208,7 @@ class TestSpotsMultiStepRoundtrip:
         rt = sp.dvcs.focal_plane.ccs.angle.ocs.focal_plane.dvcs.angle.ocs
         assert rt.frame == "ocs"
         assert rt.space == "angle"
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.arcsec), sp.dx.to_value(u.arcsec), atol=1e-10
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.arcsec), sp.dy.to_value(u.arcsec), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.arcsec, atol=1e-10)
 
     def test_fp_to_angle_frame_hop_back_to_fp(self):
         # CCS fp -> DVCS angle -> OCS fp -> CCS fp
@@ -214,12 +216,7 @@ class TestSpotsMultiStepRoundtrip:
         rt = sp.dvcs.angle.ocs.focal_plane.ccs
         assert rt.frame == "ccs"
         assert rt.space == "focal_plane"
-        np.testing.assert_allclose(
-            rt.dx.to_value(u.mm), sp.dx.to_value(u.mm), atol=1e-10
-        )
-        np.testing.assert_allclose(
-            rt.dy.to_value(u.mm), sp.dy.to_value(u.mm), atol=1e-10
-        )
+        _assert_spots_roundtrip(rt, sp, u.mm, atol=1e-10)
 
 
 class TestSpotsSlicing:
@@ -235,6 +232,18 @@ class TestSpotsSlicing:
         s = sp[1:4]
         assert len(s) == 3
         assert s.frame == sp.frame
+
+    def test_getitem_preserves_centroid_coordinates(self):
+        sp = _make_spots(5, 20, rtp=RTP)
+        s = sp[1:4]
+        np.testing.assert_allclose(
+            s.x0.to_value(u.mm),
+            sp.x0[1:4].to_value(u.mm),
+        )
+        np.testing.assert_allclose(
+            s.y0.to_value(u.mm),
+            sp.y0[1:4].to_value(u.mm),
+        )
 
     def test_frozen(self):
         sp = _make_spots(rtp=RTP)
@@ -258,6 +267,8 @@ class TestSpotsPupilCoords:
             dy=dy,
             vignetted=vig,
             field=field,
+            x0=np.zeros(n_field) * u.um,
+            y0=np.zeros(n_field) * u.um,
             frame="ccs",
             rtp=RTP,
             px=px,
@@ -308,6 +319,8 @@ class TestSpotsPupilCoords:
             dy=dy,
             vignetted=vig,
             field=field,
+            x0=np.zeros(n_field) * u.um,
+            y0=np.zeros(n_field) * u.um,
             frame="ccs",
             rtp=RTP,
             px=px,
@@ -373,8 +386,22 @@ class TestSpotsComputeMoments:
         vig_half = np.zeros(n_ray, dtype=bool)
         vig_half[:50] = True
         field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg)
-        sp_full = Spots(dx=dx, dy=dy, vignetted=vig_none, field=field)
-        sp_half = Spots(dx=dx, dy=dy, vignetted=vig_half, field=field)
+        sp_full = Spots(
+            dx=dx,
+            dy=dy,
+            vignetted=vig_none,
+            field=field,
+            x0=0.0 * u.um,
+            y0=0.0 * u.um,
+        )
+        sp_half = Spots(
+            dx=dx,
+            dy=dy,
+            vignetted=vig_half,
+            field=field,
+            x0=0.0 * u.um,
+            y0=0.0 * u.um,
+        )
         m_full = sp_full.moments(order=2)
         m_half = sp_half.moments(order=2)
         assert not np.isclose(m_full.xx.value, m_half.xx.value)
@@ -412,8 +439,22 @@ class TestSpotsComputeMoments:
             x=np.zeros(n_field) * u.deg,
             y=np.zeros(n_field) * u.deg,
         )
-        sp_vig = Spots(dx=dx, dy=dy, vignetted=vig, field=field)
-        sp_none = Spots(dx=dx, dy=dy, vignetted=np.zeros_like(vig), field=field)
+        sp_vig = Spots(
+            dx=dx,
+            dy=dy,
+            vignetted=vig,
+            field=field,
+            x0=np.zeros(n_field) * u.um,
+            y0=np.zeros(n_field) * u.um,
+        )
+        sp_none = Spots(
+            dx=dx,
+            dy=dy,
+            vignetted=np.zeros_like(vig),
+            field=field,
+            x0=np.zeros(n_field) * u.um,
+            y0=np.zeros(n_field) * u.um,
+        )
         m_vig = sp_vig.moments(order=2)
         m_none = sp_none.moments(order=2)
         np.testing.assert_allclose(m_vig.xx[0].value, m_none.xx[0].value)
@@ -490,6 +531,8 @@ class TestSpotsEDCSDVCS:
         assert ccs.frame == "ccs"
         np.testing.assert_allclose(ccs.dx, sp.dx)
         np.testing.assert_allclose(ccs.dy, sp.dy)
+        np.testing.assert_allclose(ccs.x0, sp.x0)
+        np.testing.assert_allclose(ccs.y0, sp.y0)
 
     def test_edcs_from_ccs_relabels(self):
         sp = _make_spots(frame="ccs", rtp=RTP)
@@ -497,6 +540,8 @@ class TestSpotsEDCSDVCS:
         assert edcs.frame == "edcs"
         np.testing.assert_allclose(edcs.dx, sp.dx)
         np.testing.assert_allclose(edcs.dy, sp.dy)
+        np.testing.assert_allclose(edcs.x0, sp.x0)
+        np.testing.assert_allclose(edcs.y0, sp.y0)
 
     def test_edcs_from_ocs(self):
         sp = _make_spots(frame="ocs", rtp=RTP)
@@ -505,6 +550,8 @@ class TestSpotsEDCSDVCS:
         assert edcs.frame == "edcs"
         np.testing.assert_allclose(edcs.dx, ccs.dx)
         np.testing.assert_allclose(edcs.dy, ccs.dy)
+        np.testing.assert_allclose(edcs.x0, ccs.x0)
+        np.testing.assert_allclose(edcs.y0, ccs.y0)
 
     def test_dvcs_from_edcs(self):
         sp = _make_spots(frame="edcs", rtp=RTP)
@@ -512,6 +559,8 @@ class TestSpotsEDCSDVCS:
         assert dvcs.frame == "dvcs"
         np.testing.assert_allclose(dvcs.dx, sp.dy)
         np.testing.assert_allclose(dvcs.dy, sp.dx)
+        np.testing.assert_allclose(dvcs.x0, sp.y0)
+        np.testing.assert_allclose(dvcs.y0, sp.x0)
 
     def test_dvcs_from_ccs(self):
         sp = _make_spots(frame="ccs", rtp=RTP)
@@ -519,6 +568,8 @@ class TestSpotsEDCSDVCS:
         assert dvcs.frame == "dvcs"
         np.testing.assert_allclose(dvcs.dx, sp.dy)
         np.testing.assert_allclose(dvcs.dy, sp.dx)
+        np.testing.assert_allclose(dvcs.x0, sp.y0)
+        np.testing.assert_allclose(dvcs.y0, sp.x0)
 
     def test_edcs_then_dvcs_then_edcs_roundtrip(self):
         sp = _make_spots(frame="edcs", rtp=RTP)
@@ -527,6 +578,8 @@ class TestSpotsEDCSDVCS:
         assert edcs2.frame == "edcs"
         np.testing.assert_allclose(edcs2.dx, sp.dx)
         np.testing.assert_allclose(edcs2.dy, sp.dy)
+        np.testing.assert_allclose(edcs2.x0, sp.x0)
+        np.testing.assert_allclose(edcs2.y0, sp.y0)
 
     def test_dvcs_then_edcs_then_dvcs_roundtrip(self):
         sp = _make_spots(frame="dvcs", rtp=RTP)
@@ -535,6 +588,8 @@ class TestSpotsEDCSDVCS:
         assert dvcs2.frame == "dvcs"
         np.testing.assert_allclose(dvcs2.dx, sp.dx)
         np.testing.assert_allclose(dvcs2.dy, sp.dy)
+        np.testing.assert_allclose(dvcs2.x0, sp.x0)
+        np.testing.assert_allclose(dvcs2.y0, sp.y0)
 
     def test_ocs_from_dvcs(self):
         sp = _make_spots(frame="dvcs", rtp=RTP)
@@ -543,6 +598,8 @@ class TestSpotsEDCSDVCS:
         assert dvcs2.frame == "dvcs"
         np.testing.assert_allclose(dvcs2.dx, sp.dx)
         np.testing.assert_allclose(dvcs2.dy, sp.dy)
+        np.testing.assert_allclose(dvcs2.x0, sp.x0)
+        np.testing.assert_allclose(dvcs2.y0, sp.y0)
 
 
 class TestSpotsFrameCase:
@@ -593,6 +650,8 @@ class TestSpotsAsdf:
         assert rt.dx.shape == sp.dx.shape
         np.testing.assert_allclose(rt.dx.to_value(u.um), sp.dx.to_value(u.um))
         np.testing.assert_allclose(rt.dy.to_value(u.um), sp.dy.to_value(u.um))
+        np.testing.assert_allclose(rt.x0.to_value(u.um), sp.x0.to_value(u.um))
+        np.testing.assert_allclose(rt.y0.to_value(u.um), sp.y0.to_value(u.um))
 
     def test_roundtrip_vignetted(self):
         sp = _make_spots(n_field=3, n_ray=50, rtp=RTP)
@@ -639,6 +698,18 @@ class TestSpotsAsdf:
         np.testing.assert_allclose(rt.px.to_value(u.m), px.to_value(u.m))
         np.testing.assert_allclose(rt.py.to_value(u.m), py.to_value(u.m))
 
+    def test_roundtrip_with_centroid_coords(self):
+        sp = _make_spots(n_field=3, n_ray=50, rtp=RTP)
+        rt = roundtrip_asdf_ctx(sp)
+        np.testing.assert_allclose(
+            rt.x0.to_value(u.mm),
+            sp.x0.to_value(u.mm),
+        )
+        np.testing.assert_allclose(
+            rt.y0.to_value(u.mm),
+            sp.y0.to_value(u.mm),
+        )
+
     def test_roundtrip_ccs_frame(self):
         sp = _make_spots(n_field=3, n_ray=50, frame="ccs", rtp=RTP)
         rt = roundtrip_asdf_ctx(sp)
@@ -654,6 +725,9 @@ class TestSpotsAsdf:
         rt = roundtrip_asdf_ctx(sp)
         assert rt.dx.shape == sp.dx.shape
         np.testing.assert_allclose(rt.dx.to_value(u.um), sp.dx.to_value(u.um))
+        np.testing.assert_allclose(rt.dy.to_value(u.um), sp.dy.to_value(u.um))
+        np.testing.assert_allclose(rt.x0.to_value(u.um), sp.x0.to_value(u.um))
+        np.testing.assert_allclose(rt.y0.to_value(u.um), sp.y0.to_value(u.um))
 
 
 @requires_starsharp_asdf
@@ -663,3 +737,6 @@ class TestSpotsAsdfEntryPoint:
         rt = roundtrip_asdf(sp)
         assert rt.frame == sp.frame
         np.testing.assert_allclose(rt.dx.to_value(u.um), sp.dx.to_value(u.um))
+        np.testing.assert_allclose(rt.dy.to_value(u.um), sp.dy.to_value(u.um))
+        np.testing.assert_allclose(rt.x0.to_value(u.um), sp.x0.to_value(u.um))
+        np.testing.assert_allclose(rt.y0.to_value(u.um), sp.y0.to_value(u.um))

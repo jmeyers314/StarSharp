@@ -426,7 +426,9 @@ def _sensitivity_to_x_matrix(sens: Sensitivity[ObsT]) -> np.ndarray:
         arr = getattr(gradient, field_name)
         arr = arr.value if hasattr(arr, "value") else np.asarray(arr, dtype=float)
         arr = arr.reshape(n_active, -1)  # (n_active, n_flat_obs)
-        if valid is not None:
+        # Ray-level fields (e.g. dx/dy) match the vignette mask length;
+        # field-level quantities (e.g. x0/y0) do not and should be kept intact.
+        if valid is not None and arr.shape[1] == valid.size:
             arr = arr[:, valid]
         chunks.append(arr)
 

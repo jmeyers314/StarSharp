@@ -25,8 +25,12 @@ class Spots:
         Ray positions relative to the centroid.
     vignetted : NDArray[bool]
         Vignetting mask.
+    x0, y0 : Quantity
+        Spot-centroid coordinates for each field point, in the same frame and
+        coordinate space as ``dx``/``dy``. These are included in
+        ``Sensitivity[Spots]`` predictions.
     field : FieldCoords
-        Field coordinate(s) at which the spot was computed.
+        Input/provenance field coordinate(s) at which the spot was computed.
     wavelength : Quantity or None
         Wavelength of the traced rays.
     frame : str
@@ -41,12 +45,14 @@ class Spots:
     """
 
     VALID_FRAMES = ("ocs", "ccs", "dvcs", "edcs")
-    _sensitivity_fields = ("dx", "dy")
+    _sensitivity_fields = ("dx", "dy", "x0", "y0")
     _broadcast_fields = ("vignetted",)
 
     dx: Quantity
     dy: Quantity
     vignetted: NDArray[np.bool_]
+    x0: Quantity
+    y0: Quantity
     field: FieldCoords
     wavelength: Quantity | None = None
     frame: str = "ccs"
@@ -58,6 +64,8 @@ class Spots:
         object.__setattr__(self, "dx", np.atleast_2d(self.dx))
         object.__setattr__(self, "dy", np.atleast_2d(self.dy))
         object.__setattr__(self, "vignetted", np.atleast_2d(self.vignetted))
+        object.__setattr__(self, "x0", np.atleast_1d(self.x0))
+        object.__setattr__(self, "y0", np.atleast_1d(self.y0))
         # Coerce frame to lower case, but preserve original name (including 'edcs')
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
@@ -86,7 +94,19 @@ class Spots:
             dx=self.dx[idx],
             dy=self.dy[idx],
             vignetted=self.vignetted[idx],
+            x0=self.x0[idx],
+            y0=self.y0[idx],
             field=self.field[idx],
+        )
+
+    def centroid_field(self) -> FieldCoords:
+        """Return spot centroid coordinates as a FieldCoords object.
+        """
+        return FieldCoords(
+            x=self.x0,
+            y=self.y0,
+            frame=self.frame,
+            rtp=self.rtp,
         )
 
     def _require(self, name: str):
@@ -122,7 +142,19 @@ class Spots:
         """Return a new Spots with dx/dy rotated by *angle*."""
         rdx = self.dx * np.cos(angle) + self.dy * np.sin(angle)
         rdy = -self.dx * np.sin(angle) + self.dy * np.cos(angle)
-        return replace(self, dx=rdx, dy=rdy, frame=frame)
+        rx0 = self.x0 * np.cos(angle) + self.y0 * np.sin(angle)
+        ry0 = -self.x0 * np.sin(angle) + self.y0 * np.cos(angle)
+        return replace(self, dx=rdx, dy=rdy, x0=rx0, y0=ry0, frame=frame)
+
+    @staticmethod
+    def _apply_transform(transform, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Apply a camera mapping to paired coordinate arrays, preserving shape."""
+        if x.shape != y.shape:
+            raise ValueError(f"x and y must have the same shape, got {x.shape} and {y.shape}")
+        shape = x.shape
+        xy = np.array([x.ravel(), y.ravel()])
+        tx, ty = transform.applyForward(xy)
+        return tx.reshape(shape), ty.reshape(shape)
 
     @property
     def ocs(self) -> Spots:
@@ -142,9 +174,12 @@ class Spots:
             return self._rot(rtp, "ccs")
         dx = self.dx
         dy = self.dy
+        x0 = self.x0
+        y0 = self.y0
         if self.frame == "dvcs":
             dx, dy = dy, dx
-        return replace(self, dx=dx, dy=dy, frame="ccs")
+            x0, y0 = y0, x0
+        return replace(self, dx=dx, dy=dy, x0=x0, y0=y0, frame="ccs")
 
     @property
     def edcs(self) -> Spots:
@@ -160,7 +195,11 @@ class Spots:
         if self.frame == "dvcs":
             return self
         ccs = self.ccs
-        return replace(ccs, dx=ccs.dy, dy=ccs.dx, frame="dvcs")
+        dx = ccs.dy
+        dy = ccs.dx
+        x0 = ccs.y0
+        y0 = ccs.x0
+        return replace(ccs, dx=dx, dy=dy, x0=x0, y0=y0, frame="dvcs")
 
     @property
     def focal_plane(self) -> Spots:
@@ -171,34 +210,32 @@ class Spots:
         # Work in DVCS where camera transforms are defined
         camera = default_camera()
         transform = camera.getTransform(FIELD_ANGLE, FOCAL_PLANE).getMapping()
+        dvcs = self.dvcs
 
         # spot angle centers
-        fax = self.field.angle.dvcs.x.to_value(u.radian)
-        fay = self.field.angle.dvcs.y.to_value(u.radian)
+        fax = dvcs.x0.to_value(u.radian)
+        fay = dvcs.y0.to_value(u.radian)
 
         # spot absolute angle positions
-        sfax = self.dvcs.dx.to_value(u.radian) + fax[..., np.newaxis]
-        sfay = self.dvcs.dy.to_value(u.radian) + fay[..., np.newaxis]
+        sfax = dvcs.dx.to_value(u.radian) + fax[..., np.newaxis]
+        sfay = dvcs.dy.to_value(u.radian) + fay[..., np.newaxis]
 
         # spot absolute focal plane positions
-        orig_shape = sfax.shape
-        sfa = np.array([sfax.ravel(), sfay.ravel()])
-        sfpx, sfpy = transform.applyForward(sfa)
-        sfpx = sfpx.reshape(orig_shape)
-        sfpy = sfpy.reshape(orig_shape)
+        sfpx, sfpy = self._apply_transform(transform, sfax, sfay)
 
         # spot focal plane centers
-        fp = self.field.focal_plane.dvcs
+        fpx0, fpy0 = self._apply_transform(transform, fax, fay)
 
         # spot focal plane offsets from center
-        sfpx -= fp.x.to_value(u.mm)[..., np.newaxis]
-        sfpy -= fp.y.to_value(u.mm)[..., np.newaxis]
+        sfpx -= fpx0[..., np.newaxis]
+        sfpy -= fpy0[..., np.newaxis]
 
         fp_dvcs = replace(
             self,
             dx=sfpx << u.mm,
             dy=sfpy << u.mm,
-            field=fp,
+            x0=fpx0 << u.mm,
+            y0=fpy0 << u.mm,
             frame="dvcs",
         )
         return getattr(fp_dvcs, self.frame)
@@ -212,31 +249,31 @@ class Spots:
         # Work in DVCS where camera transforms are defined
         camera = default_camera()
         transform = camera.getTransform(FOCAL_PLANE, FIELD_ANGLE).getMapping()
+        dvcs = self.dvcs
 
         # spot focal plane centers
-        fp = self.field.focal_plane.dvcs
+        fpx0 = dvcs.x0.to_value(u.mm)
+        fpy0 = dvcs.y0.to_value(u.mm)
 
         # spot absolute focal plane positions
-        sfpx = self.dvcs.dx.to_value(u.mm) + fp.x.to_value(u.mm)[..., np.newaxis]
-        sfpy = self.dvcs.dy.to_value(u.mm) + fp.y.to_value(u.mm)[..., np.newaxis]
+        sfpx = dvcs.dx.to_value(u.mm) + fpx0[..., np.newaxis]
+        sfpy = dvcs.dy.to_value(u.mm) + fpy0[..., np.newaxis]
 
         # spot absolute angle positions
-        orig_shape = sfpx.shape
-        sfp = np.array([sfpx.ravel(), sfpy.ravel()])
-        sfax, sfay = transform.applyForward(sfp)
-        sfax = sfax.reshape(orig_shape)
-        sfay = sfay.reshape(orig_shape)
+        sfax, sfay = self._apply_transform(transform, sfpx, sfpy)
 
         # spot angle centers
-        fax = self.field.angle.dvcs.x.to_value(u.radian)
-        fay = self.field.angle.dvcs.y.to_value(u.radian)
+        fax, fay = self._apply_transform(transform, fpx0, fpy0)
+
         sfax -= fax[..., np.newaxis]
         sfay -= fay[..., np.newaxis]
+
         angle_dvcs = replace(
             self,
             dx=sfax << u.radian,
             dy=sfay << u.radian,
-            field=self.field.angle.dvcs,
+            x0=fax << u.radian,
+            y0=fay << u.radian,
             frame="dvcs",
         )
         return getattr(angle_dvcs, self.frame)

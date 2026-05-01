@@ -41,15 +41,36 @@ def _make_spots(
     unit: u.Unit = u.um,
 ) -> Spots:
     rng = np.random.default_rng(12)
+    frame_l = frame.lower()
     dx = rng.normal(size=(n_field, n_ray)) * unit
     dy = rng.normal(size=(n_field, n_ray)) * unit
     vig = np.zeros((n_field, n_ray), dtype=bool)
     field = _make_field(n_field, frame="ocs", rtp=rtp)
+
+    # When rtp is missing we intentionally avoid frame conversions that require
+    # it; these helpers are used by tests that verify those conversion failures.
+    if unit.physical_type == "angle":
+        centroid = field.angle
+    elif rtp is None:
+        centroid = FieldCoords(
+            x=np.zeros(n_field) * unit,
+            y=np.zeros(n_field) * unit,
+            frame="ocs",
+            rtp=rtp,
+        )
+    else:
+        centroid = field.focal_plane
+
+    if rtp is not None and frame_l in FieldCoords.VALID_FRAMES:
+        centroid = getattr(centroid, frame_l)
+
     return Spots(
         dx=dx,
         dy=dy,
         vignetted=vig,
         field=field,
+        x0=centroid.x,
+        y0=centroid.y,
         wavelength=622.0 * u.nm,
         frame=frame,
         rtp=rtp,
@@ -63,7 +84,17 @@ def _make_spots_single(n_ray: int = 200, rtp: Angle = RTP) -> Spots:
     dy = rng.normal(0.5, 1.5, size=n_ray) * u.micron
     vig = np.zeros(n_ray, dtype=bool)
     field = FieldCoords(x=0.5 * u.deg, y=-0.3 * u.deg, frame="ocs", rtp=rtp)
-    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame="ccs", rtp=rtp)
+    centroid = field.focal_plane.ccs
+    return Spots(
+        dx=dx,
+        dy=dy,
+        vignetted=vig,
+        field=field,
+        x0=centroid.x,
+        y0=centroid.y,
+        frame="ccs",
+        rtp=rtp,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,4 +157,14 @@ def _make_spots_batched(n_field: int = 4, n_ray: int = 200, rtp: Angle = RTP) ->
         frame="ocs",
         rtp=rtp,
     )
-    return Spots(dx=dx, dy=dy, vignetted=vig, field=field, frame="ccs", rtp=rtp)
+    centroid = field.focal_plane.ccs
+    return Spots(
+        dx=dx,
+        dy=dy,
+        vignetted=vig,
+        field=field,
+        x0=centroid.x,
+        y0=centroid.y,
+        frame="ccs",
+        rtp=rtp,
+    )

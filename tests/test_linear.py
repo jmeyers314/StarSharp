@@ -352,3 +352,27 @@ class TestLinearModelVsRaytraced:
             rt_spots.dy.to_value(u.nm),
             atol=0.001,
         )
+
+        # field is provenance and should match the input field exactly.
+        np.testing.assert_allclose(
+            linear_spots.field.x.to_value(u.deg),
+            field.x.to_value(u.deg),
+        )
+        np.testing.assert_allclose(
+            linear_spots.field.y.to_value(u.deg),
+            field.y.to_value(u.deg),
+        )
+
+        # Centroid coordinates are predicted separately via centroid_field().
+        linear_centroid = linear_spots.centroid_field()
+        rt_centroid = rt_spots.centroid_field()
+        np.testing.assert_allclose(
+            linear_centroid.x.to_value(u.nm),
+            rt_centroid.x.to_value(u.nm),
+            atol=0.001,
+        )
+        np.testing.assert_allclose(
+            linear_centroid.y.to_value(u.nm),
+            rt_centroid.y.to_value(u.nm),
+            atol=0.001,
+        )

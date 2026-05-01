@@ -109,11 +109,14 @@ def _make_spots_nominal(rng=None):
     dx = rng.standard_normal((N_FIELD, N_RAY)) * u.um
     dy = rng.standard_normal((N_FIELD, N_RAY)) * u.um
     vig = np.zeros((N_FIELD, N_RAY), dtype=bool)
+    centroid = field.focal_plane.ccs
     return Spots(
         dx=dx,
         dy=dy,
         vignetted=vig,
         field=field,
+        x0=centroid.x,
+        y0=centroid.y,
         wavelength=620.0 * u.nm,
         frame="ccs",
         rtp=RTP,
@@ -124,11 +127,15 @@ def _make_spots_perturbed(nominal, step, seed):
     rng = np.random.default_rng(seed)
     ddx = rng.standard_normal(nominal.dx.shape)
     ddy = rng.standard_normal(nominal.dy.shape)
+    dcx = rng.standard_normal(nominal.x0.shape)
+    dcy = rng.standard_normal(nominal.y0.shape)
     return Spots(
         dx=nominal.dx + ddx * step * u.um,
         dy=nominal.dy + ddy * step * u.um,
         vignetted=nominal.vignetted,
         field=nominal.field,
+        x0=nominal.x0 + dcx * step * u.um,
+        y0=nominal.y0 + dcy * step * u.um,
         wavelength=nominal.wavelength,
         frame=nominal.frame,
         rtp=nominal.rtp,
@@ -350,6 +357,29 @@ class TestSensitivityPredict:
         bad_state = State(value=np.zeros(N_ACTIVE), basis="x", schema=bad_schema)
         with pytest.raises(ValueError, match="not compatible"):
             sens.predict(bad_state)
+
+    def test_predict_spots_updates_centroids_and_preserves_field(self):
+        sens = _make_spots_sensitivity()
+        state = State(value=np.array([0.01, 0.02, 0.03, 0.04]), basis="x", schema=_SCHEMA)
+        pred = sens.predict(state)
+
+        # Provenance field is metadata and should remain unchanged.
+        np.testing.assert_allclose(
+            pred.field.x.to_value(u.deg),
+            sens.nominal.field.x.to_value(u.deg),
+        )
+        np.testing.assert_allclose(
+            pred.field.y.to_value(u.deg),
+            sens.nominal.field.y.to_value(u.deg),
+        )
+
+        # Centroid coordinates are linearized observables and should update.
+        assert pred.x0 is not None
+        assert pred.y0 is not None
+        x0_delta = (pred.x0 - sens.nominal.x0).to_value(u.um)
+        y0_delta = (pred.y0 - sens.nominal.y0).to_value(u.um)
+        assert np.max(np.abs(x0_delta)) > 0.0
+        assert np.max(np.abs(y0_delta)) > 0.0
 
 
 # ---------------------------------------------------------------------------
