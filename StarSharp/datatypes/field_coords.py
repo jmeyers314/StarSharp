@@ -6,7 +6,7 @@ import astropy.units as u
 import numpy as np
 from astropy.coordinates import Angle
 from astropy.units import Quantity
-from lsst.afw.cameraGeom import FOCAL_PLANE, FIELD_ANGLE
+from ..camera import FOCAL_PLANE, FIELD_ANGLE
 from numpy.typing import NDArray
 
 

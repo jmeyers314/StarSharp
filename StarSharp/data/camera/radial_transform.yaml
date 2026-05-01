@@ -1,0 +1,25 @@
+description: LSST camera radial polynomial transforms extracted from LsstCam. r_fp
+  = sum_k a_k * r^powers[k]  (r in radians, r_fp in mm). The transform is applied
+  per-component as fpx = r_fp/r * thx, etc.
+forward:
+  r_units: radian
+  r_fp_units: mm
+  powers:
+  - 1
+  - 3
+  - 5
+  coefficients:
+  - 10310.215811575295
+  - 9135.454738032231
+  - 191952.25663487453
+inverse:
+  r_fp_units: mm
+  r_units: radian
+  powers:
+  - 1
+  - 3
+  - 5
+  coefficients:
+  - 9.699118303646038e-05
+  - -8.086290630019068e-13
+  - -1.3713569599108119e-19

@@ -2,7 +2,7 @@ from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
 from typing import Literal
-from functools import cache
+from functools import lru_cache
 import os
 
 import astropy.units as u
@@ -143,12 +143,24 @@ def default_schema(
     return schema
 
 
-@cache
-def default_camera():
-    """Load the default LSST camera."""
-    from lsst.obs.lsst import LsstCam
+@lru_cache(maxsize=2)
+def default_camera(use_lsst: bool = False):
+    """Load the default LSST camera geometry.
 
-    return LsstCam().getCamera()
+    Parameters
+    ----------
+    use_lsst : bool
+        If True, load the official ``lsst.obs.lsst.LsstCam`` (requires the
+        lsst stack) and wrap it to accept StarSharp's coordinate-system
+        sentinels.  If False (default), return the lightweight bundled
+        ``LsstCameraGeom``.
+    """
+    if use_lsst:
+        from lsst.obs.lsst import LsstCam
+        from ..camera import _LsstCameraAdapter
+        return _LsstCameraAdapter(LsstCam().getCamera())
+    from ..camera import LsstCameraGeom
+    return LsstCameraGeom()
 
 
 def default_pointing_model(

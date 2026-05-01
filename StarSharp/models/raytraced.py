@@ -7,7 +7,7 @@ import numpy as np
 from astropy.coordinates import Angle
 from astropy.units import Quantity
 from batoid_rubin import LSSTBuilder
-from lsst.afw.cameraGeom import FOCAL_PLANE
+from ..camera import FOCAL_PLANE
 from numpy.typing import NDArray
 from tqdm.std import tqdm as TqdmType
 

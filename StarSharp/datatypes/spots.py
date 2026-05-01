@@ -9,7 +9,7 @@ from astropy.units import Quantity
 from numpy.typing import NDArray
 
 from .field_coords import FieldCoords
-from lsst.afw.cameraGeom import Camera, FIELD_ANGLE, FOCAL_PLANE
+from ..camera import FIELD_ANGLE, FOCAL_PLANE
 
 
 @dataclass(frozen=True)
