@@ -338,6 +338,12 @@ class Sensitivity(Generic[ObsT]):
                 f"got {len(perturbed_list)} vs {len(steps.value)}"
             )
 
+        zero_idx = np.flatnonzero(steps.value == 0).tolist()
+        if zero_idx:
+            raise ValueError(
+                f"All step sizes must be non-zero; got zero at indices {zero_idx}"
+            )
+
         n = len(perturbed_list)
         grad_arrays: dict[str, list] = {f: [] for f in nominal._sensitivity_fields}
         for perturbed, step in zip(perturbed_list, steps.value):
