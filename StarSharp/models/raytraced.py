@@ -219,7 +219,10 @@ class RaytracedOpticalModel:
     ):
         """Build and iterate over per-field telescopes for ray-tracing operations."""
         field = field.angle.ocs
-        if not np.allclose(field.rtp, self.rtp):
+        if not np.allclose(
+            field.rtp.to_value(u.rad),
+            self.rtp.to_value(u.rad),
+        ):
             raise ValueError(
                 f"FieldCoords RTP ({field.rtp}) does not match model RTP ({self.rtp})"
             )
