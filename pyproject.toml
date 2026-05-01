@@ -12,6 +12,7 @@ dependencies = [
     "astropy",
     "galsim",
     "batoid",
+    "batoid_rubin",
     # lsst-afw (lsst.afw.cameraGeom) is required but must be installed
     # via the LSST Science Pipelines stack (conda/eups), not pip.
 ]
