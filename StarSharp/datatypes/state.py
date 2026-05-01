@@ -204,7 +204,17 @@ class StateSchema:
                     f"n_dof={self.n_dof}, got length {len(norm)}"
                 )
 
+        import warnings
         U_raw, S_raw, Vh_raw = np.linalg.svd(A @ np.diag(norm_x), full_matrices=False)
+
+        if S_raw[-1] > 0:
+            cond = S_raw[0] / S_raw[-1]
+            if cond > 1e8:
+                warnings.warn(
+                    f"StateSchema.with_svd: design matrix is ill-conditioned "
+                    f"(κ≈{cond:.2e}); v-basis modes may amplify noise.",
+                    stacklevel=2,
+                )
 
         if n_keep is None:
             n_keep = self.n_active

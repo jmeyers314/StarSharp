@@ -1,6 +1,7 @@
 """ZernikeSolver: least-squares estimation of telescope State from Zernikes."""
 
 from dataclasses import replace
+import warnings
 
 import astropy.units as u
 import numpy as np
@@ -100,10 +101,17 @@ class ZernikeSolver:
         obs  = obs[..., use_zk]
         sens = sens[..., use_zk]
 
-        x = np.linalg.lstsq(sens.reshape(sens.shape[0], -1).T, obs.ravel(), rcond=None)
+        A = sens.reshape(sens.shape[0], -1).T
+        solution, _, rank, _ = np.linalg.lstsq(A, obs.ravel(), rcond=None)
+        if rank < A.shape[1]:
+            warnings.warn(
+                f"ZernikeSolver design matrix is rank-deficient "
+                f"({rank} < {A.shape[1]}); solution may be inaccurate.",
+                stacklevel=2,
+            )
 
         return State(
-            value=x[0],
+            value=solution,
             basis=sensitivity.basis,
             schema=sensitivity.schema,
         )
