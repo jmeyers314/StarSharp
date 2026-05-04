@@ -1,3 +1,4 @@
+from .io.butler import load_observed_zernikes
 from .datatypes import (
     DoubleZernikes,
     FieldCoords,
@@ -33,4 +34,5 @@ __all__ = [
     "ZernikeSolver",
     "LinearModel",
     "RaytracedOpticalModel",
+    "load_observed_zernikes",
 ]
