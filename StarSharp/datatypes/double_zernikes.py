@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+import astropy.units as u
 import galsim
 import numpy as np
 from astropy.coordinates import Angle
@@ -26,6 +27,10 @@ class DoubleZernikes:
 
     def __post_init__(self):
         object.__setattr__(self, "coefs", np.atleast_2d(self.coefs))
+        if not self.coefs.unit.is_equivalent(u.m):
+            raise ValueError(
+                f"DoubleZernikes.coefs must have units of length, got {self.coefs.unit!r}"
+            )
 
     @property
     def jmax(self) -> int:

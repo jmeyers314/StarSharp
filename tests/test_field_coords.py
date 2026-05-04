@@ -22,12 +22,11 @@ class TestFieldCoordsConstruction:
         assert fc.x.ndim == 1
         assert len(fc) == 5  # 1-D -> 5 field points
 
-    def test_2d_stays_2d(self):
+    def test_2d_raises(self):
         x = np.ones((3, 4)) * u.deg
         y = np.zeros((3, 4)) * u.deg
-        fc = FieldCoords(x=x, y=y)
-        assert fc.x.ndim == 2
-        assert len(fc) == 3
+        with pytest.raises(ValueError, match="1-D"):
+            FieldCoords(x=x, y=y)
 
     def test_non_quantity_raises(self):
         with pytest.raises(TypeError):

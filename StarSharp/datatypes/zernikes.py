@@ -16,13 +16,16 @@ from .field_coords import FieldCoords
 class Zernikes:
     """Zernike coefficients at one or many field points.
 
-    When batched, ``coefs`` has shape ``(..., jmax + 1)``.
+    ``coefs`` has shape ``(..., nfield, jmax + 1)``.  The second-to-last axis
+    corresponds to the ``nfield`` field points in ``field``; the last axis
+    indexes Noll index *j* (0 … jmax).  Leading axes are batch dimensions.
 
     Parameters
     ----------
     coefs : Quantity
-        Zernike coefficient array.  The last axis indexes Noll
-        index *j* (0 … jmax).  Leading axes are batch dimensions.
+        Zernike coefficient array with shape ``(..., nfield, jmax + 1)``.
+        The second-to-last axis must match ``len(field)``.  The last axis
+        indexes Noll index *j* (0 … jmax).  Leading axes are batch dimensions.
     field : FieldCoords
         Field coordinates for each set of coefficients.
     R_outer : Quantity
@@ -49,6 +52,15 @@ class Zernikes:
 
     def __post_init__(self):
         object.__setattr__(self, "coefs", np.atleast_2d(self.coefs))
+        if not self.coefs.unit.is_equivalent(u.m):
+            raise ValueError(
+                f"Zernikes.coefs must have units of length, got {self.coefs.unit!r}"
+            )
+        if self.coefs.shape[-2] != len(self.field):
+            raise ValueError(
+                f"coefs.shape[-2] = {self.coefs.shape[-2]} does not match "
+                f"len(field) = {len(self.field)}"
+            )
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
         if (
@@ -87,7 +99,8 @@ class Zernikes:
         return self.coefs.shape[0]
 
     def __getitem__(self, idx) -> Zernikes:
-        return replace(self, coefs=self.coefs[idx], field=self.field[idx])
+        new_field = self.field[idx] if self.batch_shape == () else self.field
+        return replace(self, coefs=self.coefs[idx], field=new_field)
 
     def _require(self, name: str):
         """Return the instance attribute or raise if not set."""

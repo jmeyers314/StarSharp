@@ -43,6 +43,10 @@ class FieldCoords:
             raise ValueError(
                 f"x and y must have the same shape, got {self.x.shape} and {self.y.shape}"
             )
+        if self.x.ndim != 1:
+            raise ValueError(
+                f"FieldCoords x and y must be 1-D, got shape {self.x.shape}"
+            )
         # Coerce frame to lower case, but preserve original name (including 'edcs')
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)

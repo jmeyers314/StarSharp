@@ -16,8 +16,9 @@ from ..camera import FIELD_ANGLE, FOCAL_PLANE
 class Spots:
     """Spot diagrams: ray intersection positions on the focal plane.
 
-    May represent one or many field points.  When batched,
-    ``dx`` and ``dy`` have shape ``(n_field, n_ray)``.
+    ``dx`` and ``dy`` have shape ``(..., nfield, nray)``.  The second-to-last
+    axis corresponds to the ``nfield`` field points in ``field``; the last axis
+    indexes individual rays.  Leading axes are batch dimensions.
 
     Parameters
     ----------
@@ -66,6 +67,11 @@ class Spots:
         object.__setattr__(self, "vignetted", np.atleast_2d(self.vignetted))
         object.__setattr__(self, "x0", np.atleast_1d(self.x0))
         object.__setattr__(self, "y0", np.atleast_1d(self.y0))
+        if self.dx.shape[-2] != len(self.field):
+            raise ValueError(
+                f"dx.shape[-2] = {self.dx.shape[-2]} does not match "
+                f"len(field) = {len(self.field)}"
+            )
         # Coerce frame to lower case, but preserve original name (including 'edcs')
         frame = self.frame.lower()
         object.__setattr__(self, "frame", frame)
@@ -89,6 +95,7 @@ class Spots:
         return self.dx.shape[0]
 
     def __getitem__(self, idx) -> Spots:
+        new_field = self.field[idx] if self.batch_shape == () else self.field
         return replace(
             self,
             dx=self.dx[idx],
@@ -96,7 +103,7 @@ class Spots:
             vignetted=self.vignetted[idx],
             x0=self.x0[idx],
             y0=self.y0[idx],
-            field=self.field[idx],
+            field=new_field,
         )
 
     def centroid_field(self) -> FieldCoords:
