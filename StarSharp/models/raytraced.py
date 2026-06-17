@@ -96,6 +96,45 @@ class RaytracedOpticalModel:
             offset = self.sf.zero("f")
         self.offset = offset
 
+    def _effective_builder(
+        self,
+        state: State | None = None,
+        camera_piston: Quantity | None = None,
+    ):
+        """Return (builder, effective_state) with RTP, camera piston, and AOS DOFs applied."""
+        effective_state = self.offset if state is None else state + self.offset
+        b = self.builder.with_rtp(self.rtp)
+        if camera_piston is not None:
+            b = b.with_camera_piston(camera_piston.to_value(u.micron))
+        b = b.with_aos_dof(effective_state.f.value)
+        return b, effective_state
+
+    def build_telescope(
+        self,
+        state: State | None = None,
+        camera_piston: Quantity | None = None,
+    ) -> "batoid.CompoundOptic":
+        """Return the batoid optic with the current AOS offset applied.
+
+        Parameters
+        ----------
+        state : State or None
+            Additional AOS perturbation on top of the model's existing offset
+            (rtp_lookup + any offset passed at construction).  Pass ``None``
+            (default) to use only the model's offset.
+        camera_piston : Quantity or None
+            Optional camera piston (axial shift of the camera body).  Accepts
+            any astropy length quantity, e.g. ``1500 * u.micron`` or
+            ``1.5 * u.mm``.
+
+        Returns
+        -------
+        batoid.CompoundOptic
+            Perturbed telescope at the model's RTP angle and effective DOF state.
+        """
+        builder, _ = self._effective_builder(state, camera_piston)
+        return builder.build()
+
     def make_hex_field(self, outer=2.0 * u.deg, nrad=20, naz=None):
         """Create a hexapolar grid of field coordinates.
 
@@ -229,11 +268,7 @@ class RaytracedOpticalModel:
         if isinstance(zk, DoubleZernikes):
             zk = zk.single(field)
 
-        builder = self.builder.with_rtp(self.rtp)
-        if camera_piston is not None:
-            builder = builder.with_camera_piston(camera_piston.to_value(u.micron))
-        effective_state = self.offset if state is None else state + self.offset
-        builder = builder.with_aos_dof(effective_state.f.value)
+        builder, effective_state = self._effective_builder(state, camera_piston)
 
         # Keep FieldCoords transforms state-independent and apply any optional
         # state-dependent pointing correction only at the raytrace input boundary.
