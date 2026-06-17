@@ -37,6 +37,7 @@ _OPTICS_VERSIONS: dict[str, str] = {
     "3.3":    "LSST",
     "3.12":   "Rubin_v3.12",
     "3.14":   "Rubin_v3.14",
+    "1000":   "Rubin_v1000",
 }
 
 
@@ -284,6 +285,7 @@ def default_raytraced_model(
           (``LSST_<band>.yaml``).
         * ``'3.12'`` — as-built v3.12 (``Rubin_v3.12_<band>.yaml``).
         * ``'3.14'`` — as-built v3.14 (``Rubin_v3.14_<band>.yaml``).
+        * ``'1000'`` — as-built v1000 (``Rubin_v1000_<band>.yaml``).
 
         Defaults to ``'design'``.
     rtp : Angle, optional
@@ -333,7 +335,10 @@ def default_raytraced_model(
     if rtp_lookup is _DEFAULT:
         from .rtp_lookup import RTPLookup
         key = version.lstrip("v")
-        rtp_key = "3.3" if key == "design" else key  # "design" is an alias for 3.3
+        # "design" is an alias for 3.3.  v1000 reuses the v3.14 lookup: its RTP
+        # behavior was verified equivalent (max residual spot-RMS gap 0.074 um
+        # across all bands; see bootstrap/check_v1000_vs_3.14.sh).
+        rtp_key = {"design": "3.3", "1000": "3.14"}.get(key, key)
         rtp_resource = files("StarSharp").joinpath(f"data/rtp_lookup/v{rtp_key}_{band}.ecsv")
         rtp_lookup = RTPLookup.from_file(rtp_resource) if rtp_resource.is_file() else None
 
