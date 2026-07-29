@@ -366,7 +366,7 @@ class TestSpotsComputeMoments:
         with pytest.raises(ValueError):
             sp.moments(order=0)
 
-    def test_units_are_micron_power_order(self):
+    def test_units_match_input_units(self):
         sp = _make_spots_single()
         for order in (2, 3, 4):
             m = sp.moments(order=order)
@@ -374,7 +374,22 @@ class TestSpotsComputeMoments:
                 "".join(p) for p in itertools.combinations_with_replacement("xy", order)
             ]
             for name in names:
-                assert getattr(m, name).unit == u.micron**order
+                assert getattr(m, name).unit == sp.dx.unit**order
+
+    def test_units_preserved_for_angle_spots(self):
+        rng = np.random.default_rng(7)
+        n_ray = 50
+        dx = rng.normal(size=n_ray) * 1e-6 * u.rad
+        dy = rng.normal(size=n_ray) * 1e-6 * u.rad
+        field = FieldCoords(x=0.0 * u.deg, y=0.0 * u.deg)
+        sp = Spots(
+            dx=dx, dy=dy,
+            vignetted=np.zeros(n_ray, dtype=bool),
+            field=field, x0=0.0 * u.rad, y0=0.0 * u.rad,
+        )
+        m = sp.moments(order=2)
+        assert m.xx.unit == u.rad**2
+        assert m.yy.unit == u.rad**2
 
     def test_vignetted_rays_excluded(self):
         """Moments with half the rays vignetted differ from using all rays."""

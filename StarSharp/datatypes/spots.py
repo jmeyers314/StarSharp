@@ -301,17 +301,13 @@ class Spots:
         if order < 1:
             raise ValueError("Order must be at least 1")
 
-        # Convert to micron as a working unit and copy only if necessary
-        dx = self.dx.to_value(u.micron)
-        if np.shares_memory(dx, self.dx.value):
-            dx = dx.copy()
-        dy = self.dy.to_value(u.micron)
-        if np.shares_memory(dy, self.dy.value):
-            dy = dy.copy()
+        unit = self.dx.unit
+        dx = self.dx.value.copy()
+        dy = self.dy.value.copy()
         dx[self.vignetted] = np.nan
         dy[self.vignetted] = np.nan
 
-        unit = u.micron**order
+        unit = unit**order
         names = _moment_names(order)
         values = np.stack(
             [np.nanmean(dx ** name.count("x") * dy ** name.count("y"), axis=-1)
