@@ -71,8 +71,9 @@ DEFAULT_WAVELENGTHS_NM: dict[LSSTBand, u.Quantity] = {
 def default_schema(
     use_dof: list[int] | str | None = None,
     n_keep: int | None = None,
-    fwhm_exponent: float = 0.5,
+    fwhm_exponent: float = -0.5,
     range_exponent: float = 0.5,
+    norm_source: Literal["starsharp", "ts_ofc"] = "starsharp",
 ) -> StateSchema:
     """Return the standard 50-DOF LSST AOS schema.
 
@@ -90,6 +91,9 @@ def default_schema(
     fwhm_exponent, range_exponent : float
         Passed to :func:`default_normalizations` when computing SVD modes.
         Only used when ``n_keep`` is not None.
+    norm_source : {'starsharp', 'ts_ofc'}
+        Which FWHM normalization weights to use; see
+        :func:`default_normalizations`.  Only used when ``n_keep`` is not None.
     """
     dof_names: list[str] = []
     for hpod in ["M2", "Cam"]:
@@ -138,6 +142,7 @@ def default_schema(
             fwhm_exponent=fwhm_exponent,
             range_exponent=range_exponent,
             schema=schema,
+            source=norm_source,
         )
         schema = schema.with_svd(sens, norm=norm, n_keep=n_keep)
 
@@ -191,31 +196,50 @@ def default_pointing_model(
 
 
 def default_normalizations(
-    fwhm_exponent: float = 0.5,
+    fwhm_exponent: float = -0.5,
     range_exponent: float = 0.5,
     *,
     schema: StateSchema | None = None,
+    source: Literal["starsharp", "ts_ofc"] = "starsharp",
 ) -> NDArray[np.floating]:
     """Return per-DOF normalization weights ``fwhm**fwhm_exponent * range**range_exponent``.
 
-    Weights are read from ``fwhm.yaml`` and ``range.yaml``.  Both files contain
-    a plain YAML list of 50 floats in the standard 50-DOF order defined by
-    :func:`default_schema`.
+    Weights are read from the bundled ``StarSharp/data/normalization_weights/``
+    files, each a plain YAML list of 50 floats in the standard 50-DOF order
+    defined by :func:`default_schema`.
 
-    The files are resolved in this order:
+    The default exponents ``(range=0.5, fwhm=-0.5)`` satisfy
+    ``range_exponent - fwhm_exponent == 1``.  Writing ``[D]`` for a DOF's own
+    unit (um for translations and bending modes, deg for rotations),
+    ``range`` has units ``[D]`` and ``fwhm`` units ``arcsec/[D]``, so
 
-    1. ``$TS_OFC_DIR/policy/normalization_weights/`` if the environment variable
-       is set and the directory exists.
-    2. The bundled ``StarSharp/data/normalization_weights/`` fallback.
+        w = range**a * fwhm**b  ->  [D]**(a - b) * arcsec**b
+
+    and ``a - b == 1`` is what makes each weight carry its own DOF's physical
+    unit to the first power.  That is the property that matters: ``diag(w)``
+    then maps dimensionless normalized coordinates to physical perturbations
+    consistently across DOF with different units.  Any other difference leaves
+    a fractional power of ``[D]`` (e.g. ``[D]**0.65``) and is meaningless.
+
+    The leftover ``arcsec**b = arcsec**-0.5`` is unavoidable here and harmless:
+    it is a common factor across all DOF, and the SVD is invariant to overall
+    scale.
 
     Parameters
     ----------
     fwhm_exponent, range_exponent : float
         Exponents applied to the FWHM-sensitivity and working-range weights
-        respectively.  Defaults of ``(0.5, 0.5)`` give the geometric mean of both.
+        respectively.
     schema : StateSchema or None
         Schema whose DOF count is used for validation.  Defaults to
         :func:`default_schema`.
+    source : {'starsharp', 'ts_ofc'}
+        Which FWHM weights to use.  ``'starsharp'`` (default) uses
+        ``fwhm.yaml``, measured by raytracing (see
+        ``bootstrap/make_fwhm_weights.py``).  ``'ts_ofc'`` uses
+        ``fwhm_ts_ofc_quadrature.yaml``, a snapshot of the values ts_ofc/mtaos
+        derive from their linearized double-Zernike sensitivity, for
+        reproducing mtaos results exactly.  ``range.yaml`` is shared.
 
     Returns
     -------
@@ -226,27 +250,19 @@ def default_normalizations(
     if schema is None:
         schema = default_schema()
 
-    ts_ofc = os.environ.get("TS_OFC_DIR")
-    if ts_ofc:
-        candidate = Path(ts_ofc) / "policy" / "normalization_weights"
-        if candidate.is_dir():
-            weights_dir = candidate
-        else:
-            weights_dir = None
-    else:
-        weights_dir = None
+    sources = ("starsharp", "ts_ofc")
+    if source not in sources:
+        raise ValueError(f"source must be one of {sources}, got {source!r}")
 
     def _load(name: str) -> NDArray[np.floating]:
-        if weights_dir is not None:
-            text = (weights_dir / name).read_text()
-        else:
-            text = files("StarSharp").joinpath(f"data/normalization_weights/{name}").read_text()
+        text = files("StarSharp").joinpath(f"data/normalization_weights/{name}").read_text()
         arr = np.asarray(yaml.safe_load(text), dtype=float)
         if arr.ndim != 1 or len(arr) != schema.n_dof:
             raise ValueError(f"{name}: expected {schema.n_dof} values, got {arr.shape}")
         return arr
 
-    fwhm = _load("fwhm.yaml")
+    fwhm_file = "fwhm.yaml" if source == "starsharp" else "fwhm_ts_ofc_quadrature.yaml"
+    fwhm = _load(fwhm_file)
     rng = _load("range.yaml")
     return fwhm ** fwhm_exponent * rng ** range_exponent
 

@@ -1,68 +1,71 @@
 ---
-# Normalization weights for the degrees of freedom
-# Description: Normalization weights for the sensitivity matrix
+# Allowed working range of each of the 50 AOS degrees of freedom.
 #
-# The normalization weights are used to normalize
-# the sensitivity matrix and be able to operate in
-# a different basis. The normalization weights are
-# effectively a rescaling diagonal matix that is
-# applied to the sensitivity to equalize the relevance
-# of the different degrees of freedom (namelly, the
-# different units and ranges of the degrees of freedom).
-# The default is simply an identity (weights = 1)),
-# which means that the sensitivity matrix is not
-# normalized in any way. Units can be dimensionless.
-# The reduced basis weights units are um of range * arcsec of FWHM.
-# But the matrix is denormalized before retrieving the optical state,
-# so it should not be relevant.
+# Units: um for the hexapod translations (M2/Cam dz, dx, dy), degrees for
+# the hexapod rotations (rx, ry), and um of surface deformation for the
+# M1M3 and M2 bending modes.
+#
+# PROVENANCE -- these values originate in ts_ofc and are transcribed here,
+# not computed by StarSharp.  Regenerate with
+# bootstrap/make_range_weights.py (requires ts_ofc importable).
+#
+# The 10 rigid-body strokes are hard-coded literals in ts_ofc
+# (ofc_data/base_ofc_data.py::default_rb_stroke); there is no upstream YAML
+# for them.  The 40 bending-mode ranges are computed as
+#
+#     (force_range / 20) / max(|rot_mat|, axis=0)
+#
+# with force_range = 67*2 N (M1M3) and 22.5*2 N (M2), and rot_mat the
+# bending-mode-to-force influence matrices from ts_ofc's
+# policy/M1M3/M1M3_1um_156_force.yaml and policy/M2/M2_1um_72_force.yaml.
 
-- 5900.
-- 6700.
-- 6700.
-- 0.12
-- 0.12
-- 8700.
-- 7600.
-- 7600.
-- 0.24
-- 0.24
-- 0.45413045
-- 0.45243766
-- 0.08771258
-- 0.06697294
-- 0.06603379
-- 0.02352388
-- 0.02127324
-- 0.0220605
-- 0.01947111
-- 0.01376368
-- 0.01319953
-- 0.00908752
-- 0.00929749
-- 0.00930008
-- 0.00408714
-- 0.00444724
-- 0.00590511
-- 0.00599045
-- 0.00487274
-- 0.00220591
-- 0.96374756
-- 0.96802693
-- 0.13688774
-- 0.12518405
-- 0.07429941
-- 0.03062769
-- 0.0310315
-- 0.03596418
-- 0.03584434
-- 0.01699159
-- 0.01689383
-- 0.01446863
-- 0.01467367
-- 0.00874435
-- 0.00736087
-- 0.00680974
-- 0.00709834
-- 0.00246636
-- 0.00169895
-- 0.00166498
+- 5900.0  # M2_dz
+- 6700.0  # M2_dx
+- 6700.0  # M2_dy
+- 0.12  # M2_rx
+- 0.12  # M2_ry
+- 8700.0  # Cam_dz
+- 7600.0  # Cam_dx
+- 7600.0  # Cam_dy
+- 0.24  # Cam_rx
+- 0.24  # Cam_ry
+- 0.4541304520224734  # M1M3_b1
+- 0.45243765983035616  # M1M3_b2
+- 0.08771258027501166  # M1M3_b3
+- 0.06697294293105585  # M1M3_b4
+- 0.06603379353302478  # M1M3_b5
+- 0.023523884994183987  # M1M3_b6
+- 0.021273244989039517  # M1M3_b7
+- 0.0220605037302007  # M1M3_b8
+- 0.01947111228002366  # M1M3_b9
+- 0.013763683309561878  # M1M3_b10
+- 0.013199530805931831  # M1M3_b11
+- 0.009087516993317692  # M1M3_b12
+- 0.009297489982995307  # M1M3_b13
+- 0.00930008400613195  # M1M3_b14
+- 0.0040871352841779065  # M1M3_b15
+- 0.00444723816553417  # M1M3_b16
+- 0.005905107565500422  # M1M3_b17
+- 0.005990449256871359  # M1M3_b18
+- 0.004872741447975121  # M1M3_b19
+- 0.0022059072880213637  # M1M3_b20
+- 0.9637475617200469  # M2_b1
+- 0.9680269322880095  # M2_b2
+- 0.1368877356300981  # M2_b3
+- 0.12518405144228117  # M2_b4
+- 0.07429941397923784  # M2_b5
+- 0.0306276914350871  # M2_b6
+- 0.031031501761960883  # M2_b7
+- 0.03596417560523401  # M2_b8
+- 0.0358443424230561  # M2_b9
+- 0.016991591402907267  # M2_b10
+- 0.016893833819521448  # M2_b11
+- 0.014468631123080262  # M2_b12
+- 0.014673673436273616  # M2_b13
+- 0.008744350986204085  # M2_b14
+- 0.007360869159623455  # M2_b15
+- 0.006809744162209592  # M2_b16
+- 0.007098338716520179  # M2_b17
+- 0.002466357396095091  # M2_b18
+- 0.0016989508296423447  # M2_b19
+- 0.0016649757724161982  # M2_b20
