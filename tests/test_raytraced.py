@@ -279,6 +279,36 @@ class TestZernikesSensitivity:
         )
         assert isinstance(sens, Sensitivity)
 
+    def test_detector_piston_forwarded_to_zernikes(self, model):
+        """An explicit detector_piston must override the per-detnum default.
+
+        Mirrors the spots_sensitivity check: without this, focus depends on
+        which detector a field point happens to land on, even with chip
+        heights off.
+        """
+        wfs_field = model.make_ccd_field(nx=1, types="ITL_WF", detnums=[192])
+        kwargs = dict(
+            field=wfs_field, jmax=4, rings=3, basis="x", use_dof=[0],
+            include_chip_heights=False,
+        )
+        auto = model.zernikes_sensitivity(**kwargs)
+        forced = model.zernikes_sensitivity(**kwargs, detector_piston=0.0 * u.micron)
+
+        # Defocus dumps a large Z4; forcing zero piston must change it.
+        z4_auto = auto.nominal.coefs.to_value(u.um)[..., 4]
+        z4_forced = forced.nominal.coefs.to_value(u.um)[..., 4]
+        assert not np.allclose(z4_auto, z4_forced)
+        assert np.abs(z4_auto).max() > np.abs(z4_forced).max()
+
+    def test_camera_piston_forwarded_to_zernikes(self, model, small_field):
+        kwargs = dict(field=small_field, jmax=4, rings=3, basis="x", use_dof=[0])
+        base = model.zernikes_sensitivity(**kwargs)
+        pistoned = model.zernikes_sensitivity(**kwargs, camera_piston=50.0 * u.micron)
+        assert not np.allclose(
+            base.nominal.coefs.to_value(u.um),
+            pistoned.nominal.coefs.to_value(u.um),
+        )
+
     def test_nominal_is_zernikes(self, model, small_field):
         sens = model.zernikes_sensitivity(
             field=small_field, jmax=4, rings=3, basis="x", use_dof=[0]
@@ -377,6 +407,42 @@ class TestSpotsSensitivity:
             field=small_field, nrad=3, basis="x", use_dof=[0]
         )
         assert isinstance(sens, Sensitivity)
+
+    def test_detector_piston_forwarded_to_spots(self, model):
+        """An explicit detector_piston must override the per-detnum default.
+
+        Without it, a field point landing on a WFS chip is defocused by
+        +-1500 um from its detector ID alone -- even with chip heights off --
+        which silently turns science spots into giant donuts.
+        """
+        # One point on an intra-focal WFS chip, one on a science chip.
+        wfs_field = model.make_ccd_field(nx=1, types="ITL_WF", detnums=[192])
+        kwargs = dict(
+            field=wfs_field, nrad=3, basis="x", use_dof=[0],
+            include_chip_heights=False,
+        )
+        auto = model.spots_sensitivity(**kwargs)
+        forced = model.spots_sensitivity(**kwargs, detector_piston=0.0 * u.micron)
+
+        def rms(spots):
+            dx = spots.dx.to_value(u.micron)
+            dy = spots.dy.to_value(u.micron)
+            return np.sqrt(np.nanmean(dx**2 + dy**2))
+
+        # Defaulted: defocused donut.  Forced to zero: in focus, orders of
+        # magnitude smaller.
+        assert rms(auto.nominal) > 100.0
+        assert rms(forced.nominal) < 20.0
+        assert rms(auto.nominal) > 10 * rms(forced.nominal)
+
+    def test_camera_piston_forwarded_to_spots(self, model, small_field):
+        kwargs = dict(field=small_field, nrad=3, basis="x", use_dof=[0])
+        base = model.spots_sensitivity(**kwargs)
+        pistoned = model.spots_sensitivity(**kwargs, camera_piston=50.0 * u.micron)
+        assert not np.allclose(
+            base.nominal.dx.to_value(u.micron),
+            pistoned.nominal.dx.to_value(u.micron),
+        )
 
     def test_nominal_is_spots(self, model, small_field):
         sens = model.spots_sensitivity(

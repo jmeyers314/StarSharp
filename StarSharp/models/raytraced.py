@@ -758,6 +758,8 @@ class RaytracedOpticalModel:
         reference: Literal["chief", "mean", "ring"] = "ring",
         algorithm: Literal["ta", "gq", "zk"] = "gq",
         include_chip_heights: bool = True,
+        camera_piston: Quantity | None = None,
+        detector_piston: Quantity | None = None,
         tqdm: type[TqdmType] | None = None,
     ) -> Sensitivity:
         """Compute the Zernike wavefront sensitivity matrix via finite differences.
@@ -792,6 +794,11 @@ class RaytracedOpticalModel:
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
             Zernike computation.
+        camera_piston : Quantity or None
+            Optional extra piston term applied to the entire camera.
+        detector_piston : Quantity or None
+            Optional extra piston term applied to each detector independently.  If
+            None, then use the canonical piston for science/intra/extra detectors.
         tqdm : tqdm | None
             Optional tqdm progress bar.
 
@@ -829,6 +836,8 @@ class RaytracedOpticalModel:
             algorithm=algorithm,
             reference=reference,
             include_chip_heights=include_chip_heights,
+            camera_piston=camera_piston,
+            detector_piston=detector_piston,
         )
 
         perturbed = []
@@ -849,6 +858,8 @@ class RaytracedOpticalModel:
                     reference=reference,
                     algorithm=algorithm,
                     include_chip_heights=include_chip_heights,
+                    camera_piston=camera_piston,
+                    detector_piston=detector_piston,
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)
@@ -861,6 +872,8 @@ class RaytracedOpticalModel:
         nrad: int = 10,
         reference: Literal["chief", "mean", "ring"] = "ring",
         include_chip_heights: bool = True,
+        camera_piston: Quantity | None = None,
+        detector_piston: Quantity | None = None,
         tqdm: type[TqdmType] | None = None,
     ) -> Sensitivity:
         """Compute the spot-diagram sensitivity matrix via finite differences.
@@ -891,6 +904,11 @@ class RaytracedOpticalModel:
         include_chip_heights : bool
             Whether to include the effect of CCD chip height variations in the
             spot diagrams.
+        camera_piston : Quantity or None
+            Optional extra piston term applied to the entire camera.
+        detector_piston : Quantity or None
+            Optional extra piston term applied to each detector independently.  If
+            None, then use the canonical piston for science/intra/extra detectors.
         tqdm : tqdm | None
             Optional tqdm progress bar.
 
@@ -926,6 +944,8 @@ class RaytracedOpticalModel:
             nrad=nrad,
             reference=reference,
             include_chip_heights=include_chip_heights,
+            camera_piston=camera_piston,
+            detector_piston=detector_piston,
         )
 
         perturbed = []
@@ -944,6 +964,8 @@ class RaytracedOpticalModel:
                     nrad=nrad,
                     reference=reference,
                     include_chip_heights=include_chip_heights,
+                    camera_piston=camera_piston,
+                    detector_piston=detector_piston,
                 )
             )
         return Sensitivity.from_finite_differences(nominal, perturbed, steps)
@@ -975,7 +997,8 @@ class RaytracedOpticalModel:
         **kwargs
             Extra keyword arguments forwarded to :meth:`zernikes_sensitivity`,
             including ``field``, ``basis``, ``use_dof``, ``jmax``, ``rings``,
-            ``reference``, ``algorithm``, and ``include_chip_heights``.
+            ``reference``, ``algorithm``, ``include_chip_heights``,
+            ``camera_piston``, and ``detector_piston``.
 
         Returns
         -------
