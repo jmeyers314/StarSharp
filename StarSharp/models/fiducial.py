@@ -276,7 +276,7 @@ def default_raytraced_model(
     state_schema: StateSchema | None = None,
     use_dof: list[int] | str | None = None,
     n_keep: int | None = None,
-    fwhm_exponent: float = 0.5,
+    fwhm_exponent: float = -0.5,
     range_exponent: float = 0.5,
     offset: State | None = None,
     pointing_model: PointingModel | None | _DefaultType = _DEFAULT,

@@ -214,6 +214,32 @@ class TestDefaultRaytracedModelArgs:
         assert sig.parameters["pointing_model"].default is _DEFAULT
         assert sig.parameters["rtp_lookup"].default is _DEFAULT
 
+    def test_norm_exponent_defaults_match_default_schema(self):
+        """The exponent defaults must not drift from default_schema's.
+
+        default_raytraced_model forwards these to default_schema, so a
+        mismatch silently gives the model different vmodes than
+        default_schema(n_keep=...) would -- see
+        test_vmodes_match_default_schema.
+        """
+        from StarSharp.models.fiducial import default_raytraced_model
+        model_sig = inspect.signature(default_raytraced_model)
+        schema_sig = inspect.signature(default_schema)
+        for name in ("fwhm_exponent", "range_exponent"):
+            assert (
+                model_sig.parameters[name].default
+                == schema_sig.parameters[name].default
+            ), f"{name} default differs between the two functions"
+
+    @requires_default_sensitivity
+    def test_vmodes_match_default_schema(self):
+        from StarSharp.models.fiducial import default_raytraced_model
+        kwargs = dict(use_dof="0-16,30-34", n_keep=12)
+        model = default_raytraced_model(**kwargs)
+        np.testing.assert_allclose(
+            model.state_schema.Vh, default_schema(**kwargs).Vh
+        )
+
     def test_standard_args(self):
         from StarSharp.models.fiducial import default_raytraced_model
         model = default_raytraced_model(
