@@ -11,6 +11,39 @@ from numpy.typing import NDArray
 Basis: TypeAlias = Literal["f", "x", "v"]
 
 
+def _dof_value_to_float(name: str, value, unit: u.UnitBase) -> float:
+    """Coerce a named DOF coefficient to a float in ``unit``.
+
+    Plain numbers are interpreted as already being in ``unit``; a Quantity is
+    converted.  Dimensionally incompatible Quantities raise ValueError.
+    """
+    if isinstance(value, u.Quantity):
+        try:
+            return float(value.to_value(unit))
+        except u.UnitConversionError as exc:
+            raise ValueError(
+                f"Cannot convert {name}={value!r} to the DOF unit {unit}"
+            ) from exc
+    return float(value)
+
+
+def _vmode_value_to_float(name: str, value) -> float:
+    """Coerce a v-basis mode coefficient to a float.
+
+    v-basis coefficients have no single physical unit -- each mode mixes DOFs
+    with different units -- so only dimensionless Quantities are accepted.
+    """
+    if isinstance(value, u.Quantity):
+        if value.unit.physical_type != u.dimensionless_unscaled.physical_type:
+            raise ValueError(
+                f"{name}={value!r} has units, but v-basis mode coefficients are "
+                "dimensionless: each mode mixes DOFs with different units, so "
+                "there is no unit to convert to.  Pass a plain number instead."
+            )
+        return float(value.to_value(u.dimensionless_unscaled))
+    return float(value)
+
+
 @dataclass(frozen=True)
 class StateSchema:
     """Pure descriptor for the DOF structure shared by State and Sensitivity.
@@ -334,6 +367,19 @@ class StateFactory:
 
         Mixing DOF names with ``vmodeN`` keys is not allowed.
         Any coefficient not explicitly provided is set to 0.0.
+
+        Values
+        ------
+        For DOF-name keys, values may be plain numbers -- interpreted as
+        already being in that DOF's unit from ``dof_units`` -- or
+        ``Quantity`` objects, which are converted::
+
+            factory.by_name(M2_dz=1 * u.micron)
+            factory.by_name(M2_rx=1 * u.arcsec)
+
+        For ``vmodeN`` keys only plain numbers (or dimensionless Quantities)
+        are accepted: a v-basis mode mixes DOFs with different units, so its
+        coefficient has no single physical unit.
         """
         if not kwargs:
             return self.zero("x")
@@ -384,12 +430,14 @@ class StateFactory:
                         f"{k!r} is out of range for n_keep={self.n_keep}; "
                         f"valid keys are vmode1..vmode{self.n_keep}"
                     )
-                vvalue[mode_idx - 1] = v
+                vvalue[mode_idx - 1] = _vmode_value_to_float(k, v)
             return self.v(vvalue)
 
+        active_units = tuple(self.dof_units[i] for i in self.use_dof)
         xvalue = np.zeros(self.n_active, dtype=float)
         for k, v in kwargs.items():
-            xvalue[active_name_to_idx[k]] = v
+            idx = active_name_to_idx[k]
+            xvalue[idx] = _dof_value_to_float(k, v, active_units[idx])
         return self.x(xvalue)
 
     def zero(self, basis: Basis = "f") -> State:

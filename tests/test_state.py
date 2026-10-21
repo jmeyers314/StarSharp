@@ -287,6 +287,42 @@ class TestStateFactory:
         with pytest.raises(ValueError, match="Invalid kwargs"):
             sf.by_name(unknown_dof=1.0)
 
+    def test_by_name_quantity_same_unit(self):
+        sf = StateFactory(schema=_make_schema(5))  # all mm
+        s = sf.by_name(dof0=3.0 * u.mm)
+        assert s.value[0] == pytest.approx(3.0)
+
+    def test_by_name_quantity_converts(self):
+        sf = StateFactory(schema=_make_schema(5))  # all mm
+        s = sf.by_name(dof0=1.0 * u.micron)
+        assert s.value[0] == pytest.approx(1e-3)
+
+    def test_by_name_quantity_per_dof_unit(self):
+        """Each key converts against its own DOF's unit, not a global one."""
+        schema = StateSchema(
+            dof_names=("M2_dz", "M2_rx"),
+            dof_units=(u.um, u.deg),
+        )
+        sf = StateFactory(schema=schema)
+        s = sf.by_name(M2_dz=1 * u.micron, M2_rx=3600 * u.arcsec)
+        assert s.value[0] == pytest.approx(1.0)
+        assert s.value[1] == pytest.approx(1.0)
+
+    def test_by_name_quantity_incompatible_raises(self):
+        sf = StateFactory(schema=_make_schema(5))  # all mm
+        with pytest.raises(ValueError, match="Cannot convert"):
+            sf.by_name(dof0=1.0 * u.deg)
+
+    def test_by_name_vmode_rejects_quantity(self):
+        sf = self._make_factory(with_Vh=True)
+        with pytest.raises(ValueError, match="dimensionless"):
+            sf.by_name(vmode1=7.0 * u.mm)
+
+    def test_by_name_vmode_accepts_dimensionless(self):
+        sf = self._make_factory(with_Vh=True)
+        s = sf.by_name(vmode1=7.0 * u.dimensionless_unscaled)
+        assert s.value[0] == pytest.approx(7.0)
+
 
 # ---------------------------------------------------------------------------
 # TestStateConstruction
