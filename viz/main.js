@@ -942,14 +942,14 @@ const GRID_MINOR_COLOR = 'rgba(122, 178, 255, 0.04)';
 const GRID_MAJOR_COLOR = 'rgba(122, 178, 255, 0.05)';
 // Corner index order is set by RaytracedOpticalModel.make_wfs_mean_field(),
 // which walks the WFS detector pairs as 191/192, 195/196, 199/200, 203/204 --
-// i.e. rafts R00, R04, R40, R44.  Their OCS field angles are (-,-), (-,+),
-// (+,-), (+,+) respectively, and the view is y-up (world +y renders toward the
-// top), so each card is anchored to the screen corner holding its own donuts.
+// i.e. rafts R00, R04, R40, R44, at OCS field angles (-,-), (-,+), (+,-),
+// (+,+) respectively.  The view renders +y toward the top (flipY: false), so
+// negative y anchors to CSS bottom and positive y to CSS top.
 const CORNER_OVERLAY_POSITIONS = [
-  {left: '4%', top: '80%', raft: 'R00'},
-  {left: '4%', top: '8%', raft: 'R04'},
-  {right: '4%', top: '80%', raft: 'R40'},
-  {right: '4%', top: '8%', raft: 'R44'},
+  {left: '4%', bottom: '8%', raft: 'R00'},   // (-x, -y)
+  {left: '4%', top: '8%', raft: 'R04'},      // (-x, +y)
+  {right: '4%', bottom: '8%', raft: 'R40'},  // (+x, -y)
+  {right: '4%', top: '8%', raft: 'R44'},     // (+x, +y)
 ];
 const ZERNIKE_DISPLAY_ROWS = [
   {label: 'Z4:', terms: [4]},
@@ -1102,7 +1102,8 @@ function buildZernikeOutputs() {
     const anchor = CORNER_OVERLAY_POSITIONS[cornerIndex] || {left: '50%', top: '50%'};
     if (anchor.left != null) card.style.left = anchor.left;
     if (anchor.right != null) card.style.right = anchor.right;
-    card.style.top = anchor.top;
+    if (anchor.top != null) card.style.top = anchor.top;
+    if (anchor.bottom != null) card.style.bottom = anchor.bottom;
 
     if (anchor.raft) {
       const raftEl = document.createElement('div');
@@ -1167,7 +1168,11 @@ function initializeDeck() {
 
   deckgl = new DeckGL({
     canvas,
-    views: [new OrthographicView({id: 'ortho'})],
+    // flipY defaults to true (deck.gl assumes top-left screen coordinates).
+    // Our positions are physical focal-plane coordinates with +y up, so the
+    // default silently mirrors every spot pattern, every donut, and the field
+    // layout itself about the x axis.
+    views: [new OrthographicView({id: 'ortho', flipY: false})],
     initialViewState: { target: [0, 0, 0], zoom: 0 },
     controller: false,
     layers: []

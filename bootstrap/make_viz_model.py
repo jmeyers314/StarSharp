@@ -134,6 +134,14 @@ def parse_args():
         help="Disable the default pointing model")
     parser.add_argument("--no-rtp-lookup", action="store_true",
         help="Disable the default RTP lookup table")
+    parser.add_argument("--spot-optic", default=None, metavar="YAML",
+        help="DIAGNOSTIC: trace the spot and donut blocks through this batoid "
+             "yaml instead of the one implied by --version/--band.  Intended "
+             "for LSST_r_align_holes.yaml, whose artificial pupil "
+             "obscurations spell '+X' and '+Y' on the pupil and so make the "
+             "OCS orientation directly visible in the rendered spots.  "
+             "Sensitivities and Zernikes still use the real optic, so the "
+             "output is for orientation checks only -- do not ship it")
     return parser.parse_args()
 
 
@@ -189,6 +197,47 @@ def load_ts_ofc_sensitivity(kmax: int, jmax: int) -> np.ndarray:
     out = np.zeros((ndof, want, native_jmax1), dtype=arr.dtype)
     out[:, :native_kmax1, :] = arr
     return out
+
+
+def with_spot_optic(base, yaml_name: str):
+    """Return a copy of *base* that ray-traces through a different batoid optic.
+
+    Used by ``--spot-optic`` to swap in a diagnostic optics description (e.g.
+    ``LSST_r_align_holes.yaml``, which carries artificial pupil obscurations
+    spelling "+X" and "+Y") for the spot blocks only.
+
+    Everything that is not the optic is carried over verbatim: rtp, wavelength,
+    schema, pointing model, and the AOS offset.  Note that ``base.offset``
+    *already* includes the RTP lookup contribution -- ``__init__`` folds the
+    lookup into the offset -- so the clone is built with ``rtp_lookup=None``.
+    Passing both would apply the lookup twice.
+    """
+    import batoid
+    from batoid_rubin import LSSTBuilder
+
+    from StarSharp.models.raytraced import RaytracedOpticalModel
+
+    path = Path(yaml_name)
+    # batoid.Optic.fromYaml resolves bare names against its own data dirs;
+    # anything path-like is passed through as given.
+    fiducial = batoid.Optic.fromYaml(
+        str(path) if path.is_file() else yaml_name
+    )
+    builder = LSSTBuilder(
+        fiducial,
+        dof_coord_system="OCS",
+        flip_m2_bending_modes=False,
+        dof_angle_units="degree",
+    )
+    return RaytracedOpticalModel(
+        builder=builder,
+        rtp=base.rtp,
+        wavelength=base.wavelength,
+        state_schema=base.state_schema,
+        offset=base.offset,
+        pointing_model=base.pointing_model,
+        rtp_lookup=None,  # already folded into base.offset
+    )
 
 
 def spots_arrays(sens):
@@ -252,6 +301,20 @@ def main():
         flush=True,
     )
 
+    # The spot blocks may be traced through a different optic than the
+    # sensitivities; see --spot-optic.  Normally this is the same model.
+    spot_model = model
+    if args.spot_optic:
+        spot_model = with_spot_optic(model, args.spot_optic)
+        print(
+            f"\n  *** DIAGNOSTIC BUILD: spots traced through "
+            f"{args.spot_optic!r} ***\n"
+            f"      Sensitivities and Zernikes still use "
+            f"{args.version}/{args.band}, so the spot and sensitivity blocks "
+            f"describe different optics.  Orientation checks only.\n",
+            flush=True,
+        )
+
     # ---------------------------------------------------------------- fields
     science_field = model.make_hex_field(
         outer=field_outer, nrad=args.science_nrad
@@ -265,7 +328,7 @@ def main():
         f"pupil nrad={args.pupil_nrad}",
         flush=True,
     )
-    science_sens = model.spots_sensitivity(
+    science_sens = spot_model.spots_sensitivity(
         science_field,
         nrad=args.pupil_nrad,
         include_chip_heights=False,
@@ -277,10 +340,10 @@ def main():
     N = nfield * nray
 
     # --------------------------------------------------------- donut spots
-    # The intra/extra-focal piston is applied automatically from the detector
-    # IDs, so both calls are identical apart from the field.
+    # Focus is passed explicitly rather than inferred from detector ID, so the
+    # two calls differ only in field and piston sign.
     print(f"Donut spots: intra, pupil nrad={args.donut_nrad}", flush=True)
-    intra_sens = model.spots_sensitivity(
+    intra_sens = spot_model.spots_sensitivity(
         intra_field,
         nrad=args.donut_nrad,
         include_chip_heights=False,
@@ -288,7 +351,7 @@ def main():
         tqdm=tqdm,
     )
     print(f"Donut spots: extra, pupil nrad={args.donut_nrad}", flush=True)
-    extra_sens = model.spots_sensitivity(
+    extra_sens = spot_model.spots_sensitivity(
         extra_field,
         nrad=args.donut_nrad,
         include_chip_heights=False,
@@ -489,6 +552,9 @@ def main():
             "rtp_lookup": model.rtp_lookup is not None,
             "include_chip_heights": False,
             "generator": "bootstrap/make_viz_model.py",
+            # Non-null only for a --spot-optic diagnostic build, where the
+            # spot blocks and the sensitivity blocks describe different optics.
+            "spot_optic_override": args.spot_optic,
         },
         "dof_names": list(schema.dof_names),
         "dof_units": [str(x) for x in schema.dof_units],
