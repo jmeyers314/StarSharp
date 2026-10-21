@@ -1,0 +1,399 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Rubin Observatory Optical Sensitivity Model</title>
+  <script src="https://unpkg.com/deck.gl@9.1.13/dist.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      min-height: 100%;
+      font-family: system-ui, sans-serif;
+    }
+    @supports (display: grid) {
+      body {
+        display: grid;
+        grid-template-columns: minmax(700px, 48vw) 1fr;
+      }
+    }
+    #ui  { position: relative; z-index: 10; padding: 12px; border-right: 1px solid #ddd; background: #fff; overflow: auto; }
+    #ui {
+      width: min(48vw, 920px);
+      min-width: 700px;
+      flex: 0 0 auto;
+      box-sizing: border-box;
+    }
+    @supports (display: grid) {
+      #ui {
+        width: auto;
+      }
+    }
+    #vis {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      background-color: #0b0f14;
+    }
+    #vis canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+    .row { display: grid; grid-template-columns: 135px 1fr 86px; gap: 6px; align-items: center; margin: 3px 0; }
+    .row label { white-space: nowrap; font-size: 11px; }
+    .row span { text-align: right; font-family: ui-monospace, Menlo, monospace; }
+    .row input[type="range"] { margin: 0; }
+    .row input[type="number"] {
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 11px;
+      font-family: ui-monospace, Menlo, monospace;
+      padding: 2px 4px;
+    }
+    .controls { display: flex; gap: 8px; margin-bottom: 10px; }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 8px;
+      font-size: 12px;
+    }
+    .checkbox-row input[type="checkbox"] {
+      margin: 0;
+    }
+    .slider-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-height: 0; align-items: start; }
+    .control-column { min-width: 0; }
+    .control-title { font-size: 12px; font-weight: 600; margin: 4px 0 8px; }
+    .app-title { font-weight: 600; margin-bottom: 6px; }
+    .intrinsics-label { font-size: 12px; margin-left: 10px; }
+    .mono-input-small { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+    #mixing-matrix-canvas {
+      display: block;
+      margin-top: 8px;
+      max-width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fff;
+    }
+    #dz-sens-canvas {
+      display: block;
+      margin-top: 8px;
+      max-width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fff;
+    }
+    #dz-vmode-canvas {
+      display: block;
+      margin-top: 8px;
+      max-width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fff;
+    }
+    .zernike-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 6;
+      pointer-events: none;
+      color: #d7e7ff;
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 9px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+    }
+    .zernike-corner {
+      position: absolute;
+      min-width: 116px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      background: rgba(11, 15, 20, 0.38);
+    }
+    .zernike-rows {
+      display: grid;
+      gap: 1px;
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 9px;
+      white-space: pre;
+    }
+    .zernike-row {
+      display: block;
+      min-height: 1.2em;
+    }
+    .zernike-value {
+      display: inline-block;
+      text-align: left;
+      white-space: pre;
+    }
+    .btn { border: 1px solid #bbb; background: #f7f7f7; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; transition: all 80ms ease-out; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn:active:not(:disabled) { transform: scale(0.96); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2); background: #efefef; }
+    .axis-labels {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      z-index: 5;
+      color: #d7e7ff;
+      font-size: 12px;
+      font-family: ui-monospace, Menlo, monospace;
+      pointer-events: none;
+      opacity: 0.85;
+      line-height: 1.2;
+    }
+    .mouse-coords {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      z-index: 5;
+      color: #d7e7ff;
+      font-size: 12px;
+      font-family: ui-monospace, Menlo, monospace;
+      pointer-events: none;
+      opacity: 0.9;
+    }
+    .zoom-controls {
+      position: absolute;
+      right: 10px;
+      top: 38px;
+      z-index: 6;
+      display: flex;
+      gap: 6px;
+      pointer-events: auto;
+    }
+    .zoom-btn {
+      border: 1px solid rgba(215, 231, 255, 0.75);
+      background: rgba(11, 15, 20, 0.55);
+      color: #d7e7ff;
+      border-radius: 4px;
+      width: 28px;
+      height: 24px;
+      padding: 0;
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+      font-family: ui-monospace, Menlo, monospace;
+    }
+    .zoom-btn.wide {
+      width: auto;
+      min-width: 46px;
+      padding: 0 8px;
+      font-size: 11px;
+    }
+    .scale-bar {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      z-index: 5;
+      color: #d7e7ff;
+      font-size: 12px;
+      font-family: ui-monospace, Menlo, monospace;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      opacity: 0.9;
+    }
+    .scale-bar-line {
+      height: 0;
+      border-top: 2px solid #d7e7ff;
+      width: 24px;
+    }
+    .scale-bar-group-gap {
+      margin-top: 6px;
+    }
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(11, 15, 20, 0.82);
+      color: #e5edf8;
+      font-family: ui-monospace, Menlo, monospace;
+      pointer-events: none;
+    }
+    .loading-panel {
+      width: min(420px, calc(100% - 48px));
+      display: grid;
+      gap: 8px;
+    }
+    .loading-title {
+      font-size: 12px;
+      letter-spacing: 0.02em;
+    }
+    .loading-track {
+      height: 8px;
+      border: 1px solid rgba(229, 237, 248, 0.35);
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .loading-fill {
+      height: 100%;
+      width: 0%;
+      background: #7ab2ff;
+      transition: width 100ms linear;
+    }
+    .loading-text {
+      font-size: 11px;
+      opacity: 0.92;
+    }
+    .loading-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .loading-copy-btn {
+      border: 1px solid rgba(229, 237, 248, 0.55);
+      background: rgba(122, 178, 255, 0.12);
+      color: #e5edf8;
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    .loading-copy-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .loading-copy-status {
+      font-size: 11px;
+      opacity: 0.9;
+      min-height: 1em;
+    }
+    .is-hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div class="app-title">Rubin Observatory Optical Sensitivity Model</div>
+    <div class="controls">
+      <button id="reset-controls" class="btn" type="button" disabled>Loading…</button>
+      <label class="intrinsics-label">
+        <input id="include-intrinsics" type="checkbox" checked> Include intrinsics
+      </label>
+    </div>
+    <div class="slider-columns">
+      <div class="control-column">
+        <div class="control-title">DOF Controls</div>
+        <div id="sliders"></div>
+      </div>
+      <div class="control-column">
+        <div class="control-title">V-Mode Controls</div>
+        <div class="row">
+          <label title="Which FWHM normalization weights scale the SVD. StarSharp's are measured by raytracing; ts_ofc's come from their linearized double-Zernike sensitivity.">FWHM wts</label>
+          <select id="fwhm-source-select"></select>
+          <span></span>
+        </div>
+        <div class="row">
+          <label title="Which double-Zernike sensitivity matrix the SVD decomposes.">Sens matrix</label>
+          <select id="sens-source-select"></select>
+          <span></span>
+        </div>
+        <div class="row">
+          <label>Range exp</label>
+          <input id="range-exp-input" type="number" step="0.1">
+          <span></span>
+        </div>
+        <div class="row">
+          <label>FWHM exp</label>
+          <input id="fwhm-exp-input" type="number" step="0.1">
+          <span></span>
+        </div>
+        <div class="row">
+          <label>Use DOFs</label>
+          <input id="use-dof-input" class="mono-input-small" type="text">
+          <button id="apply-vmodes" class="btn" type="button">Apply</button>
+        </div>
+        <div class="row">
+          <label>N keep</label>
+          <input id="nkeep-input" type="number" min="1" max="50">
+          <span></span>
+        </div>
+        <div id="vmode-sliders"></div>
+        <canvas id="mixing-matrix-canvas" aria-label="V-mode mixing matrix"></canvas>
+        <div class="row">
+          <label>Max field</label>
+          <input id="dz-field-max-input" type="number" min="1">
+          <span></span>
+        </div>
+        <div class="row">
+          <label>Max pupil</label>
+          <input id="dz-pupil-max-input" type="number" min="4">
+          <span></span>
+        </div>
+        <canvas id="dz-sens-canvas" aria-label="DZ sensitivity per V-mode"></canvas>
+        <div class="row">
+          <label>Show vmode</label>
+          <select id="dz-vmode-select"></select>
+          <span></span>
+        </div>
+        <canvas id="dz-vmode-canvas" aria-label="Double Zernike matrix for selected V-mode"></canvas>
+      </div>
+    </div>
+  </div>
+  <div id="vis">
+    <canvas id="grid-canvas" aria-hidden="true"></canvas>
+    <canvas id="deck-canvas"></canvas>
+    <div id="loading-overlay" class="loading-overlay" aria-live="polite">
+      <div class="loading-panel">
+        <div class="loading-title">Loading model data…</div>
+        <div class="loading-track"><div id="loading-fill" class="loading-fill"></div></div>
+        <div id="loading-text" class="loading-text">Starting download…</div>
+        <div class="loading-actions">
+          <button id="copy-diagnostics" class="loading-copy-btn" type="button">Copy diagnostics</button>
+          <div id="copy-diagnostics-status" class="loading-copy-status" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+    <div class="axis-labels" aria-hidden="true">y ↑<br>x →</div>
+    <div id="mouse-coords" class="mouse-coords" aria-hidden="true">x: ---, y: ---</div>
+    <div id="zernike-overlay" class="zernike-overlay" aria-hidden="true"></div>
+    <div class="zoom-controls" aria-label="Zoom controls">
+      <button id="zoom-in" class="zoom-btn" type="button" title="Zoom in">+</button>
+      <button id="zoom-out" class="zoom-btn" type="button" title="Zoom out">−</button>
+      <button id="zoom-reset" class="zoom-btn wide" type="button" title="Reset zoom">Reset</button>
+    </div>
+    <div class="scale-bar" aria-hidden="true">
+      <div id="scale-bar-line" class="scale-bar-line"></div>
+      <div>0.1 deg (field)</div>
+      <div id="scale-bar-spot-line" class="scale-bar-line scale-bar-group-gap"></div>
+      <div id="scale-bar-spot-label">— px (spot)</div>
+      <div id="scale-bar-donut-line" class="scale-bar-line scale-bar-group-gap"></div>
+      <div id="scale-bar-donut-label">— px (donut)</div>
+    </div>
+  </div>
+
+<script type="module" src="./main.js"></script>
+<script nomodule>
+  (function () {
+    var overlay = document.getElementById('loading-overlay');
+    var fill = document.getElementById('loading-fill');
+    var text = document.getElementById('loading-text');
+    var resetButton = document.getElementById('reset-controls');
+
+    if (fill) {
+      fill.style.width = '0%';
+    }
+    if (text) {
+      text.textContent = 'This browser is not supported. Please update to a recent Chrome, Firefox, Safari, or Edge version.';
+    }
+    if (overlay) {
+      overlay.classList.remove('is-hidden');
+    }
+    if (resetButton) {
+      resetButton.disabled = true;
+      resetButton.textContent = 'Unsupported browser';
+    }
+  })();
+</script>
+</body>
+</html>
