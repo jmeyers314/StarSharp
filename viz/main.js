@@ -940,11 +940,16 @@ const GRID_PITCH_WORLD_UNITS = 0.048;
 const GRID_MAJOR_EVERY = 5;
 const GRID_MINOR_COLOR = 'rgba(122, 178, 255, 0.04)';
 const GRID_MAJOR_COLOR = 'rgba(122, 178, 255, 0.05)';
+// Corner index order is set by RaytracedOpticalModel.make_wfs_mean_field(),
+// which walks the WFS detector pairs as 191/192, 195/196, 199/200, 203/204 --
+// i.e. rafts R00, R04, R40, R44.  Their OCS field angles are (-,-), (-,+),
+// (+,-), (+,+) respectively, and the view is y-up (world +y renders toward the
+// top), so each card is anchored to the screen corner holding its own donuts.
 const CORNER_OVERLAY_POSITIONS = [
-  {left: '4%', top: '80%'},
-  {left: '4%', top: '8%'},
-  {right: '4%', top: '80%'},
-  {right: '4%', top: '8%'},
+  {left: '4%', top: '80%', raft: 'R00'},
+  {left: '4%', top: '8%', raft: 'R04'},
+  {right: '4%', top: '80%', raft: 'R40'},
+  {right: '4%', top: '8%', raft: 'R44'},
 ];
 const ZERNIKE_DISPLAY_ROWS = [
   {label: 'Z4:', terms: [4]},
@@ -1098,6 +1103,13 @@ function buildZernikeOutputs() {
     if (anchor.left != null) card.style.left = anchor.left;
     if (anchor.right != null) card.style.right = anchor.right;
     card.style.top = anchor.top;
+
+    if (anchor.raft) {
+      const raftEl = document.createElement('div');
+      raftEl.className = 'zernike-raft';
+      raftEl.textContent = anchor.raft;
+      card.appendChild(raftEl);
+    }
 
     const rowsEl = document.createElement('div');
     rowsEl.className = 'zernike-rows';
